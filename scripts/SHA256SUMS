@@ -1,0 +1,6 @@
+acd6576a81f6a62aec11885f714fe864f76347c92a006489a4265c8a67180083 *ubuntu-base-26.04-beta-base-amd64.tar.gz
+5e18429d97adc79f1c3496044fcbbdf7f2363868e2bc6762b15ffdcbd85cf0df *ubuntu-base-26.04-beta-base-arm64.tar.gz
+b639066c158271aa11d10eb78c8e9b7a7301e6fbd14f9ad75e4f9a455a2ee3ee *ubuntu-base-26.04-beta-base-armhf.tar.gz
+2de8a73c1f39eb0d0f0ca4964af791003e812e89a103c4902c9ce38cf3fb9389 *ubuntu-base-26.04-beta-base-ppc64el.tar.gz
+f0068ed924262ea9493093a86be25f81baac83258ddbbdb5885b23ef54ea90e1 *ubuntu-base-26.04-beta-base-riscv64.tar.gz
+5c9e923b9063d17d9c89ca7905e8497b90d4758feec56284bd8b69e0b791b4d7 *ubuntu-base-26.04-beta-base-s390x.tar.gz

@@ -1,0 +1,15 @@
+# ROM binaries, firmware images, rootfs tarballs — never commit.
+# Individual ROM trees can run into single-digit GB each.
+roms/
+
+# Live local configuration for this device. Keep examples tracked, but never
+# publish actual SSH keys, tailnet names, LAN IPs, adb serials, or key paths.
+config/*.env
+!config/*.env.example
+scripts/authorized_keys
+
+# Agent-private local state (Claude Code per-project settings).
+.claude/
+
+# macOS metadata
+.DS_Store
