@@ -28,13 +28,12 @@ Turning a Xiaomi Poco F5 5G (`marble`, Snapdragon 7+ Gen 2) into a headless ARM6
 ## What's in this repo
 
 - `docs/` — design, install playbooks, lessons learned (`LESSONS.md`)
-- `config/` — tracked local-config template plus gitignored `moon.env` for live deployment values
+- `config/` — tracked local-config templates (`moon.env.example`, `authorized_keys.example`) plus the gitignored live `moon.env` and `authorized_keys` for this checkout
 - `scripts/` — shell scripts that run on the device
   - `start_ubuntu.sh` — chroot entry (narrow `/dev` binds, DNS, hostname)
   - `extract.sh` — unpack the Ubuntu rootfs tarball into `/data/data/com.termux/files/home/ubuntu`
   - `apt_bootstrap.sh` — first-run `apt update` + base package install
-  - `ssh_setup.sh` — configure OpenSSH on port 2222, idempotently provision the non-root `user` account
-  - `authorized_keys.example` — template for the gitignored live `scripts/authorized_keys` allowlist installed for the OpenSSH `user` account
+  - `ssh_setup.sh` — configure OpenSSH on port 2222, idempotently provision the non-root `user` account from the gitignored `config/authorized_keys` allowlist
   - `tailscale_setup.sh` — start `tailscaled` in userspace-networking mode
   - `agents_setup.sh` — install AI-agent toolchains (tmux, Node 24, uv) + the `tmux-service` helper
   - `agents_start.sh` — boot-time launcher for AI agents (opt-in via `agents.enabled` flag file)

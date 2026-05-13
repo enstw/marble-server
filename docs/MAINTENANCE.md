@@ -55,7 +55,7 @@ All aliases land **inside the chroot**. OpenSSH is non-root by design (`PermitRo
 | Tailscale identity | `/var/lib/tailscale/tailscaled.state` (inside chroot) | reboots; lost if chroot rebuilt |
 | `user` account + home | `/etc/passwd`, `/home/user/` (inside chroot) | reboots; re-provisioned (locked) by `ssh_setup.sh` on chroot rebuild |
 | `user` password hash | `/etc/shadow` (inside chroot) | reboots; **lost on chroot rebuild** — re-run `passwd user` once to re-enable sudo |
-| SSH authorized_keys (user) | `/home/user/.ssh/authorized_keys` (inside chroot) | reboots; re-installed from the gitignored live `scripts/authorized_keys` by `ssh_setup.sh` on every invocation. **Do not edit manually in the chroot — edits will be wiped on reboot.** |
+| SSH authorized_keys (user) | `/home/user/.ssh/authorized_keys` (inside chroot) | reboots; re-installed from the gitignored live `config/authorized_keys` by `ssh_setup.sh` on every invocation. **Do not edit manually in the chroot — edits will be wiped on reboot.** |
 | KSU module | `/data/adb/modules/moon-ssh/` | reboots, Lineage OTAs, factory reset wipes |
 | On-device script copies | `/data/data/com.termux/files/home/{start_ubuntu,ssh_setup,tailscale_setup,reboot,android-lock,android-unlock}.sh` + `authorized_keys` | reboots |
 
@@ -340,7 +340,7 @@ adb exec-out su -c 'cat /data/data/com.termux/files/home/ubuntu/var/lib/tailscal
 adb exec-out su -c 'cd /data/data/com.termux/files/home/ubuntu/etc/ssh && tar -cf - ssh_host_*' \
   > ssh_host_keys.tar
 
-# 3. Drifted on-device scripts + authorized_keys (compare against repo `scripts/`)
+# 3. Drifted on-device scripts + authorized_keys (compare against repo `scripts/` and `config/authorized_keys`)
 adb exec-out su -c 'cd /data/data/com.termux/files/home && tar -cf - *.sh authorized_keys' \
   > termux-home-scripts.tar
 ```

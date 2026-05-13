@@ -17,7 +17,7 @@ ANDROID_LOCK_SH=/data/data/com.termux/files/home/android-lock.sh
 ANDROID_UNLOCK_SH=/data/data/com.termux/files/home/android-unlock.sh
 
 if [ ! -r "$KEYS" ]; then
-    echo "ERROR: $KEYS missing — push scripts/authorized_keys first" >&2
+    echo "ERROR: $KEYS missing — push config/authorized_keys first" >&2
     exit 1
 fi
 if [ ! -r "$REBOOT_SH" ]; then

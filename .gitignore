@@ -6,7 +6,8 @@ roms/
 # publish actual SSH keys, tailnet names, LAN IPs, adb serials, or key paths.
 config/*.env
 !config/*.env.example
-scripts/authorized_keys
+config/authorized_keys
+!config/authorized_keys.example
 
 # Agent-private local state (Claude Code per-project settings).
 .claude/
