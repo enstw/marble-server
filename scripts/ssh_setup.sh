@@ -121,6 +121,16 @@ set-option -g default-terminal "screen-256color"
 set-option -sa terminal-overrides ",xterm*:Tc"
 # Touchpad / mouse scroll into copy-mode and back through the scrollback.
 set-option -g mouse on
+# Natural-scroll bindings: wheel-down enters copy-mode and pages back into
+# history (mirror of tmux's default WheelUpPane behaviour, on the opposite
+# wheel); wheel-up in a normal pane is a no-op so it doesn't enter copy-mode
+# in the wrong direction. Inside copy-mode the wheel directions are swapped.
+bind-key -T root WheelDownPane if-shell -F -t = "#{?pane_in_mode,1,#{alternate_on}}" "send-keys -M" "copy-mode -e ; send-keys -M"
+bind-key -T root WheelUpPane if-shell -F -t = "#{?pane_in_mode,1,#{alternate_on}}" "send-keys -M" ""
+bind-key -T copy-mode    WheelUpPane   send-keys -X scroll-down
+bind-key -T copy-mode    WheelDownPane send-keys -X scroll-up
+bind-key -T copy-mode-vi WheelUpPane   send-keys -X scroll-down
+bind-key -T copy-mode-vi WheelDownPane send-keys -X scroll-up
 EOF
 chmod 0644 /etc/tmux.conf
 
