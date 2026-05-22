@@ -24,12 +24,12 @@
 exec sh /data/data/com.termux/files/home/start_ubuntu.sh << 'CHROOT_CMD'
 set -e
 
-# FreelOAder — local OpenAI-compatible proxy in front of claude/codex/gemini
+# FreelOAder — local OpenAI-compatible proxy in front of the claude/codex
 # CLIs (~/.hermes/config.yaml points at http://127.0.0.1:8000/v1). Must come
 # up before hermes so hermes' first turn finds the gateway listening; hermes
 # tolerates initial connect retries but skipping the race is cheaper than
 # debugging a "model unavailable" at boot.
-su -l user -s /bin/sh -c 'tmux-service freeloader -- sh -c "cd /home/user/freeloader && exec .venv/bin/uvicorn freeloader.frontend.app:create_app --factory --host 127.0.0.1 --port 8000"'
+su -l user -s /bin/sh -c 'tmux-service freeloader -- sh -c "cd /home/user/freeloader && exec .venv/bin/uvicorn freeloader.server:create_default_app --factory --host 127.0.0.1 --port 8000"'
 
 # Hermes Agent gateway — migrated 2026-05-07 from the systemd-user unit
 # Hermes ships (`hermes gateway install` writes ~/.config/systemd/user/
