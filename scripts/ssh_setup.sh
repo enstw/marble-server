@@ -119,18 +119,31 @@ set-option -g default-shell /bin/zsh
 # ssh_setup.sh runs at boot, so it is the authoritative tmux config writer.
 set-option -g default-terminal "screen-256color"
 set-option -sa terminal-overrides ",xterm*:Tc"
-# Touchpad / mouse scroll into copy-mode and back through the scrollback.
+# Mouse on: wheel scroll + pane select/resize. (prefix+m toggles this off so the
+# attached terminal can own a drag-select for native copy — see clipboard note.)
 set-option -g mouse on
-# Natural-scroll bindings: wheel-down enters copy-mode and pages back into
-# history (mirror of tmux's default WheelUpPane behaviour, on the opposite
-# wheel); wheel-up in a normal pane is a no-op so it doesn't enter copy-mode
-# in the wrong direction. Inside copy-mode the wheel directions are swapped.
-bind-key -T root WheelDownPane if-shell -F -t = "#{?pane_in_mode,1,#{alternate_on}}" "send-keys -M" "copy-mode -e ; send-keys -M"
-bind-key -T root WheelUpPane if-shell -F -t = "#{?pane_in_mode,1,#{alternate_on}}" "send-keys -M" ""
-bind-key -T copy-mode    WheelUpPane   send-keys -X scroll-down
-bind-key -T copy-mode    WheelDownPane send-keys -X scroll-up
-bind-key -T copy-mode-vi WheelUpPane   send-keys -X scroll-down
-bind-key -T copy-mode-vi WheelDownPane send-keys -X scroll-up
+# Wheel bindings: NORMAL direction — wheel-up pages back into scrollback history,
+# wheel-down returns toward the present. A previous "natural-scroll" block here
+# inverted the wheel (down=history, up=no-op), which double-inverted against the
+# Mac touchpad and made scrolling feel reversed; these are the sane defaults.
+# (source-file cannot remove a live binding, so the inverted ones had to be
+# overridden, not just deleted.) See docs/LESSONS.md §6.
+bind-key -T root WheelUpPane   if-shell -F -t= "#{?pane_in_mode,1,#{alternate_on}}" "send-keys -M" "copy-mode -e ; send-keys -M"
+bind-key -T root WheelDownPane if-shell -F -t= "#{?pane_in_mode,1,#{alternate_on}}" "send-keys -M" "send-keys -M"
+bind-key -T copy-mode    WheelUpPane   send-keys -X scroll-up
+bind-key -T copy-mode    WheelDownPane send-keys -X scroll-down
+bind-key -T copy-mode-vi WheelUpPane   send-keys -X scroll-up
+bind-key -T copy-mode-vi WheelDownPane send-keys -X scroll-down
+# Clipboard: emit OSC 52 on copy so a copy-mode selection rides the SSH stream to
+# the attached terminal's own clipboard. This is the ONLY clipboard bridge on
+# this headless chroot — no DISPLAY/Wayland, no xclip/wl-copy/pbcopy. CAVEAT:
+# macOS Terminal.app silently ignores OSC 52; from it use prefix+m then
+# Fn/Option-drag + Cmd-C, or attach from iTerm2/WezTerm/kitty (OSC 52-capable).
+set-option -g set-clipboard on
+# prefix+m: toggle mouse capture. off -> attached terminal owns the mouse for a
+# native drag-select + copy; on -> tmux scroll/pane mouse. Toggling (vs leaving
+# off) keeps wheel-scroll as the default. See docs/LESSONS.md §6.
+bind-key m set-option -g mouse \; display-message "mouse #{?mouse,on,off}"
 EOF
 chmod 0644 /etc/tmux.conf
 
