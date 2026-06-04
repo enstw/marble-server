@@ -36,7 +36,8 @@ nohup /usr/sbin/tailscaled \
 sleep 3
 
 # Re-apply prefs and force the link up. Flags must match the original
-# interactive `tailscale up` (see docs/04-tailscale.md) — modern Tailscale
+# interactive `tailscale up` (see docs/INSTALLATION.md § "Phase 3.5 —
+# Tailscale") — modern Tailscale
 # requires every preference to be specified on each `up`, otherwise it
 # rejects the call. No --force-reauth: tailscaled.state already holds a
 # valid node key, so this is a silent no-op when keys are still good and

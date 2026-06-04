@@ -3,11 +3,11 @@
 #
 # Android drops the CPU into a lower-power state when the screen is off,
 # and Doze policy nibbles further at throughput for background workloads.
-# Even with the lockscreen disabled (the standing policy on this device
-# so CE storage auto-unlocks at boot — see docs/01-lineage-ksu.md), the
-# screen-off power state is measurable at the Ubuntu workload layer. This
-# script is the manual override for when you need governors pinned back
-# to performance.
+# Even with the lockscreen disabled (the standing policy on this device so
+# CE storage auto-unlocks at boot — see docs/INSTALLATION.md § "CE storage
+# prerequisite"), the screen-off power state is measurable at the Ubuntu
+# workload layer. This script is the manual override for when you need
+# governors pinned back to performance.
 #
 # Self-handles the chroot escape — see android-lock.sh for the rationale.
 #
