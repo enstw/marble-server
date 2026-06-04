@@ -619,7 +619,7 @@ sudo mv /etc/host-hooks/50-agents.hook /etc/host-hooks/50-agents.hook.disabled  
 
 The runner globs `*.hook`, so a `.disabled` suffix takes the file out of the boot set without deleting it. `rm` is the kill switch; rename is the reversible toggle.
 
-**Run as another user — `run-as`:** hooks run as root inside the chroot. To launch something as the non-root `user`, call `run-as <user> -- <cmd>` (a thin `su -l <user> -s /bin/sh -c …` wrapper; see `scripts/run-as.sh`, installed to `/usr/local/sbin/run-as` by `agents_setup.sh`). `-l` gives the agent a clean login env + the user's PATH (`~/.local/bin` for uv, etc.).
+**Run as another user — `run-as`:** hooks run as root inside the chroot. To launch something as the non-root `user`, call `run-as <user> -- <cmd>` (a thin `su -l <user> -s /bin/sh -c …` wrapper; see `scripts/run-as.sh`, installed to `/usr/local/sbin/run-as` by `ssh_setup.sh` as baseline provisioning, so any hook can rely on it). `-l` gives the agent a clean login env + the user's PATH (`~/.local/bin` for uv, etc.).
 
 **Start-only:** hooks launch *already-provisioned* services — boot does **not** re-provision. After a rootfs rebuild or a config/key change, re-run the matching `*_setup.sh` (e.g. edit `config/authorized_keys` → re-run `ssh_setup.sh`; a bare reboot won't pick the edit up). `10-sshd.hook` refuses to start if `ssh_setup.sh` never ran (no `sshd_config.d/10-moon.conf`), so a missing provision fails loudly instead of bringing sshd up on stock defaults.
 
