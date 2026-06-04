@@ -1,38 +1,54 @@
 #!/bin/sh
-# 50-agents.hook — launch the AI agents inside the chroot at boot.
+# 50-agents.hook — TEMPLATE: launch your AI agents inside the chroot at boot.
 #
-# Dispatched by ksu-moon-ssh/service.sh inside the chroot; runs as ROOT. Each
-# agent is one line that drops to its owning user with `run-as`. Runs last so
-# an agent failing to boot can't mask an sshd/tailscale regression in the exit
-# code service.sh reports.
+# Dispatched by ksu-moon-ssh/service.sh inside the chroot; runs as ROOT, last —
+# so an agent failing to boot can't mask an sshd/tailscale regression in the
+# exit code service.sh reports.
 #
-# Enable/disable: rename the file. This hook ships DISABLED by default
-# (deployed as 50-agents.hook.disabled) so boot stays quiet during setup —
-# `sudo mv 50-agents.hook.disabled 50-agents.hook` once your agents are
-# configured below; rename back (or `rm`) for a dead-simple kill switch.
+# This file ships as a TEMPLATE: every agent line is commented out, so it does
+# nothing until you uncomment an example or add your own. It is also deployed
+# DISABLED (50-agents.hook.disabled). Two switches, both yours:
+#   1. uncomment / add the agent lines you want, then
+#   2. enable the hook:
+#        sudo mv /etc/host-hooks/50-agents.hook.disabled /etc/host-hooks/50-agents.hook
+#      (rename back, or `rm`, to kill.)
 #
-# Requires agents_setup.sh to have installed `tmux-service` and `run-as` into
-# /usr/local/sbin and the per-agent toolchains. `run-as <user> -- <cmd>` is a
-# thin `su -l <user> -s /bin/sh -c` wrapper (see scripts/run-as.sh) — it gives
-# the agent a clean login env + the user's PATH (~/.local/bin for uv, etc.).
+# Pattern — one line per agent:
+#   run-as <user> -- tmux-service <name> -- <start-cmd> [args...]
 #
-# Logs land in /home/user/.local/state/moon-agents/<name>.log. Attach with:
+#   run-as        drop root -> the owning user (su -l <user> -s /bin/sh -c …;
+#                 gives the agent a clean login env + the user's PATH). See
+#                 scripts/run-as.sh.
+#   tmux-service  supervise it: named detached tmux session, while-true crash
+#                 loop, log tee to ~/.local/state/moon-agents/<name>.log. The
+#                 chroot has no systemd, so this is the "unit". See
+#                 scripts/tmux-service.sh.
+#
+# Requires agents_setup.sh to have installed tmux-service + run-as and the
+# per-agent toolchains (Node 24, uv). Attach to a running agent over ssh:
 #   ssh moon-user -t tmux attach -t <name>
 set -e
 
-# FreelOAder — local OpenAI-compatible proxy in front of the claude/codex
-# CLIs (~/.hermes/config.yaml points at http://127.0.0.1:8000/v1). Must come
-# up before hermes so hermes' first turn finds the gateway listening; hermes
-# tolerates initial connect retries but skipping the race is cheaper than
-# debugging a "model unavailable" at boot.
-run-as user -- tmux-service freeloader -- sh -c 'cd /home/user/freeloader && exec .venv/bin/uvicorn freeloader.server:create_default_app --factory --host 127.0.0.1 --port 8000'
+# --- Generic example ---------------------------------------------------------
+# run-as user -- tmux-service myagent -- myagent serve --port 9000
 
-# Hermes Agent gateway — migrated 2026-05-07 from the systemd-user unit Hermes
-# ships (`hermes gateway install`). That unit is dead in this chroot — there's
-# no PID 1 / systemd-user, by design (see docs/DESIGN.md). We use Hermes's
-# foreground `gateway run` mode instead, the path the Hermes docs flag as
-# "recommended for WSL, Docker, Termux" — exactly the no-init path this chroot
-# is on. tmux-service supplies the missing pieces (named session for attach,
-# while-true crash loop, log tee). --replace cleans up any lingering hermes
-# process from a prior boot before the new instance binds the gateway socket.
-run-as user -- tmux-service hermes -- hermes gateway run --replace
+# --- FreelOAder (example) ----------------------------------------------------
+# Local OpenAI-compatible proxy in front of the claude/codex CLIs. Start it
+# BEFORE any agent whose ~/.hermes/config.yaml base_url points at it
+# (http://127.0.0.1:8000/v1), so the gateway is listening on the first turn.
+# `cd` is load-bearing (relative .venv + cwd-resolved freeloader.toml);
+# create_default_app is a factory, hence --factory. Full gotchas:
+# docs/INSTALLATION.md § "Configuring which agents start".
+# run-as user -- tmux-service freeloader -- sh -c 'cd /home/user/freeloader && exec .venv/bin/uvicorn freeloader.server:create_default_app --factory --host 127.0.0.1 --port 8000'
+
+# --- Hermes Agent gateway (example) ------------------------------------------
+# Foreground `gateway run` (NOT `gateway install` / `start` — those want a
+# systemd-user unit this chroot doesn't have). --replace clears a stale hermes
+# from a prior boot before binding the gateway socket. Full gotchas:
+# docs/INSTALLATION.md § "Configuring which agents start".
+# run-as user -- tmux-service hermes -- hermes gateway run --replace
+
+# --- OpenClaw (example) ------------------------------------------------------
+# run-as user -- tmux-service openclaw -- openclaw gateway --port 18789
+
+# --- Your agents below -------------------------------------------------------

@@ -639,27 +639,38 @@ sudo install -m 0755 scripts/host-hooks/10-sshd.hook /etc/host-hooks/10-sshd.hoo
 
 ### Configuring which agents start
 
-Edit `scripts/host-hooks/50-agents.hook`. One line per agent via `run-as`. FreelOAder + Hermes are wired up by default (2026-05-07), in that order:
+`scripts/host-hooks/50-agents.hook` ships as a **template** — every agent line is commented out, so the hook does nothing until you uncomment an example or add your own. One line per agent via `run-as`:
+
+```sh
+run-as <user> -- tmux-service <name> -- <start-cmd> [args...]
+```
+
+The template carries three ready-to-uncomment examples (FreelOAder, Hermes, OpenClaw); their command lines and inline caveats live in the hook itself. The fuller gotchas for the two that need them:
+
+**FreelOAder** — local OpenAI-compatible proxy in front of the claude/codex CLIs:
 
 ```sh
 run-as user -- tmux-service freeloader -- sh -c 'cd /home/user/freeloader && exec .venv/bin/uvicorn freeloader.server:create_default_app --factory --host 127.0.0.1 --port 8000'
-run-as user -- tmux-service hermes -- hermes gateway run --replace
 ```
 
-FreelOAder-specific gotchas:
-
-- **Order matters.** `~/.hermes/config.yaml` points `base_url` at `http://127.0.0.1:8000/v1`. Hermes tolerates initial-connect retries, but bringing FreelOAder up first avoids a noisy first turn after boot.
+- **Order matters.** `~/.hermes/config.yaml` points `base_url` at `http://127.0.0.1:8000/v1`. Hermes tolerates initial-connect retries, but bringing FreelOAder up first (list it above Hermes) avoids a noisy first turn after boot.
 - **`--factory`.** `freeloader.server:create_default_app` is a factory function (it constructs the app from `load_router_config()`), not a module-level `app`. Without `--factory`, uvicorn tries to import an attribute that doesn't exist.
 - **`cd /home/user/freeloader` is load-bearing.** `.venv/bin/uvicorn` is relative, and `freeloader.toml` (when present) is resolved from cwd before falling back to `~/.local/share/freeloader/freeloader.toml`.
 - **Editable install survives reboot, build cache does not.** `.venv/lib/.../site-packages/_editable_impl_freeloader.pth` points at `src/`, so no rebuild is needed at boot. If you ever re-run `uv sync`, see freeloader's `README.md` § "Run the server" for the f2fs/SELinux build-cache trap.
-- **Port / factory-path changes touch four spots.** `127.0.0.1:8000` and the `--factory` target are encoded in (a) the live `tmux-service` invocation, (b) `scripts/host-hooks/50-agents.hook` here, (c) the deployed copy at `/etc/host-hooks/50-agents.hook`, AND (d) `~/.hermes/config.yaml`'s `base_url`. Change any without the others and Hermes either can't connect or hits a stale gateway.
+- **Port / factory-path changes touch three spots.** `127.0.0.1:8000` and the `--factory` target are encoded in (a) the live `tmux-service` invocation, (b) the freeloader line in `50-agents.hook` (repo source and the deployed `/etc/host-hooks/` copy are kept in sync by `agents_setup.sh`), AND (c) `~/.hermes/config.yaml`'s `base_url`. Change any without the others and Hermes either can't connect or hits a stale gateway.
 
-Hermes-specific gotcha: `hermes gateway install` writes a systemd-user unit at `~/.config/systemd/user/hermes-gateway.service` and `hermes gateway start` invokes that unit. Both are dead in this chroot — no PID 1 / no systemd-user. Use `hermes gateway run` (Hermes flags as "recommended for WSL, Docker, Termux") and let `tmux-service` supply the supervisor layer. `--replace` clears any lingering hermes process from a prior boot before binding the gateway socket. If you ran `hermes gateway install` before this migration, `rm ~/.config/systemd/user/hermes-gateway.service` to clean up — `hermes gateway uninstall` itself trips on `systemctl --user daemon-reload`, so the rm is the working uninstall path here.
-
-OpenClaw remains optional — pattern is the same:
+**Hermes** — agent gateway:
 
 ```sh
-run-as user -- tmux-service openclaw -- openclaw gateway --port 18789
+run-as user -- tmux-service hermes -- hermes gateway run --replace
+```
+
+`hermes gateway install` writes a systemd-user unit at `~/.config/systemd/user/hermes-gateway.service` and `hermes gateway start` invokes that unit. Both are dead in this chroot — no PID 1 / no systemd-user. Use `hermes gateway run` (Hermes flags as "recommended for WSL, Docker, Termux") and let `tmux-service` supply the supervisor layer. `--replace` clears any lingering hermes process from a prior boot before binding the gateway socket. If you ran `hermes gateway install` before this migration, `rm ~/.config/systemd/user/hermes-gateway.service` to clean up — `hermes gateway uninstall` itself trips on `systemctl --user daemon-reload`, so the rm is the working uninstall path here.
+
+Once you've uncommented/added your lines, enable the hook (it deploys disabled):
+
+```sh
+sudo mv /etc/host-hooks/50-agents.hook.disabled /etc/host-hooks/50-agents.hook
 ```
 
 Then reboot (or power-cycle) and confirm:

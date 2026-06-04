@@ -19,8 +19,9 @@
 #                          *_setup.sh provisioning script — boot does not
 #                          re-provision.
 #
-# Core hooks shipped: 10-sshd, 20-tailscale (enabled), 50-agents (disabled by
-# default — deployed as 50-agents.hook.disabled). Sources: scripts/host-hooks/.
+# Core hooks shipped: 10-sshd, 20-tailscale (enabled), 50-agents (a template
+# of commented agent examples, deployed disabled as 50-agents.hook.disabled).
+# Sources: scripts/host-hooks/.
 #
 # Depends on: /data/data/com.termux/files/home/start_ubuntu.sh and the
 # extracted Ubuntu rootfs at /data/data/com.termux/files/home/ubuntu. Relies

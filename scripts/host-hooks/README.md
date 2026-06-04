@@ -18,7 +18,7 @@ This README is just the contract for writing/editing a hook.
 | :--- | :--- | :--- |
 | `10-sshd.hook` | start OpenSSH (port 2222) | enabled |
 | `20-tailscale.hook` | start tailscaled (userspace networking) + `tailscale up` | enabled |
-| `50-agents.hook` | launch the AI agents (freeloader, hermes, …) | **disabled** (deployed as `.disabled`) |
+| `50-agents.hook` | **template** — launches the AI agents you uncomment/add (freeloader, hermes, openclaw examples included) | **disabled** (deployed as `.disabled`) |
 
 Numeric prefix = run order. Keep gaps (10/20/50) so new hooks can slot between.
 
