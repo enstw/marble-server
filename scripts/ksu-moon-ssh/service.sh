@@ -101,7 +101,7 @@ for h in /etc/host-hooks/*.hook; do
     ran=1
     name=$(basename "$h")
     echo "=== hook $name start $(date) ==="
-    ( "$h" ); rc=$?   # exec directly (hooks are 0755) so each honors its own shebang
+    ( "$h" ); rc=$?   # run the file directly (hooks are 0755) so each honors its own shebang
     echo "=== hook $name exited rc=$rc at $(date) ==="
     if [ "$rc" -ne 0 ] && [ "$first_fail" -eq 0 ]; then
         first_fail=$rc
