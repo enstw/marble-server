@@ -16,6 +16,7 @@ REBOOT_SH=/data/data/com.termux/files/home/reboot.sh
 ANDROID_LOCK_SH=/data/data/com.termux/files/home/android-lock.sh
 ANDROID_UNLOCK_SH=/data/data/com.termux/files/home/android-unlock.sh
 SSHD_HOOK=/data/data/com.termux/files/home/10-sshd.hook
+RUNAS_SH=/data/data/com.termux/files/home/run-as.sh
 
 if [ ! -r "$KEYS" ]; then
     echo "ERROR: $KEYS missing — push config/authorized_keys first" >&2
@@ -33,6 +34,10 @@ if [ ! -r "$SSHD_HOOK" ]; then
     echo "ERROR: $SSHD_HOOK missing — push scripts/host-hooks/10-sshd.hook first" >&2
     exit 1
 fi
+if [ ! -r "$RUNAS_SH" ]; then
+    echo "ERROR: $RUNAS_SH missing — push scripts/run-as.sh first" >&2
+    exit 1
+fi
 
 # Deploy the boot hook (start-only sshd launcher) into the chroot. The hook is
 # what brings sshd up at boot — service.sh runs every /etc/host-hooks/*.hook.
@@ -41,6 +46,13 @@ fi
 # redeposits it. Iterate on the hook via `sudo install` (see INSTALLATION.md).
 install -d -m 0755 "$UBUNTU/etc/host-hooks"
 install -m 0755 "$SSHD_HOOK" "$UBUNTU/etc/host-hooks/10-sshd.hook"
+
+# Deploy the run-as helper. It's the generic privilege-drop any boot hook uses
+# to run a command as a non-root user (`run-as <user> -- <cmd>`), so it belongs
+# with the baseline provisioning, not the opt-in agent toolchain — a hook can
+# rely on it being present even if agents_setup.sh was never run. Sits in
+# /usr/local/sbin alongside the reboot/android-lock/unlock helpers below.
+install -m 0755 "$RUNAS_SH" "$UBUNTU/usr/local/sbin/run-as"
 
 # Stage authorized_keys + reboot.sh + android-{lock,unlock}.sh from Android
 # side into a temporary location. All get moved into the chroot's final
@@ -242,17 +254,10 @@ if [ -f /home/user/.bashrc ]; then
         /home/user/.bashrc
 fi
 
-# Forcefully clean up any stale listeners before starting.
-pkill -9 -f '/usr/sbin/sshd' 2>/dev/null || true
-sleep 1
-/usr/sbin/sshd
-
-sleep 1
-echo --- sshd process ---
-ps -eo pid,user,cmd | grep -E 'sshd( |$)' | grep -v grep
-echo --- listening ---
-ss -ltnp 2>/dev/null | grep 2222 || echo "(ss not finding :2222 — trying netstat)"
-netstat -ltn 2>/dev/null | grep 2222 || echo "(netstat missing or not listening)"
-echo --- auth keys ---
-ls -la /home/user/.ssh/
+# Start sshd by running the boot hook we deployed above, so "how to start sshd"
+# has a single source of truth: 10-sshd.hook (the same file service.sh runs at
+# boot). Provisioning thus leaves a live sshd exactly as a boot would bring up,
+# and there's no start/verify logic duplicated between this script and the hook.
+# The hook's provisioning guard passes — 10-moon.conf was just written above.
+sh /etc/host-hooks/10-sshd.hook
 CHROOT_CMD

@@ -6,8 +6,10 @@
 #   - Node 24 via NodeSource (OpenClaw and other Node-based agents)
 #   - uv via Astral (Hermes and other Python-based agents; user-scope)
 #   - /usr/local/bin/tmux-service helper (see scripts/tmux-service.sh)
-#   - /usr/local/sbin/run-as helper (see scripts/run-as.sh) — privilege-drop
-#     used by /etc/host-hooks/50-agents.hook to launch agents as `user`
+#
+# The run-as helper that 50-agents.hook uses to drop to `user` is a generic
+# hook helper and is installed by ssh_setup.sh (baseline provisioning), not
+# here — see scripts/run-as.sh.
 #
 # Idempotent — safe to re-run. Assumes phase 3 is done (the `user` account
 # exists; sudo is installed).
@@ -19,15 +21,10 @@ set -e
 
 UBUNTU=/data/data/com.termux/files/home/ubuntu
 HELPER_SRC=/data/data/com.termux/files/home/tmux-service.sh
-RUNAS_SRC=/data/data/com.termux/files/home/run-as.sh
 AGENTS_HOOK=/data/data/com.termux/files/home/50-agents.hook
 
 if [ ! -r "$HELPER_SRC" ]; then
     echo "ERROR: $HELPER_SRC missing — push scripts/tmux-service.sh first" >&2
-    exit 1
-fi
-if [ ! -r "$RUNAS_SRC" ]; then
-    echo "ERROR: $RUNAS_SRC missing — push scripts/run-as.sh first" >&2
     exit 1
 fi
 if [ ! -r "$AGENTS_HOOK" ]; then
@@ -35,11 +32,10 @@ if [ ! -r "$AGENTS_HOOK" ]; then
     exit 1
 fi
 
-# Stage the helpers under /usr/local. tmux-service goes in /bin (user's default
-# PATH); run-as in /sbin (root-only helper, called from boot hooks). /usr/local
-# is dpkg-untouched so both survive apt upgrades.
+# Stage the tmux-service helper at /usr/local/bin (in user's default PATH,
+# unlike /sbin). /usr/local is dpkg-untouched so the install survives apt
+# upgrades. (run-as is deployed by ssh_setup.sh — see header.)
 install -m 0755 "$HELPER_SRC" "$UBUNTU/usr/local/bin/tmux-service"
-install -m 0755 "$RUNAS_SRC" "$UBUNTU/usr/local/sbin/run-as"
 
 # Deploy the agents boot hook DISABLED by default (.disabled suffix) so boot
 # stays quiet until you opt in. Enable with:
@@ -98,5 +94,5 @@ node --version
 npm --version
 su -l user -s /bin/sh -c 'PATH="$HOME/.local/bin:$PATH" uv --version'
 echo --- helpers ---
-ls -l /usr/local/bin/tmux-service /usr/local/sbin/run-as
+ls -l /usr/local/bin/tmux-service /usr/local/sbin/run-as   # run-as from ssh_setup.sh
 CHROOT_CMD

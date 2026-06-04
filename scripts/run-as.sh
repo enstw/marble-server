@@ -3,8 +3,8 @@
 # chroot's boot hooks (/etc/host-hooks/*.hook run as root) to launch
 # user-owned services; usable interactively too.
 #
-# Installed at /usr/local/sbin/run-as by agents_setup.sh. Source of truth is
-# scripts/run-as.sh in the repo.
+# Installed at /usr/local/sbin/run-as by ssh_setup.sh (baseline provisioning,
+# so any boot hook can rely on it). Source of truth is scripts/run-as.sh.
 #
 # Usage:  run-as <user> -- <cmd> [args...]
 #   run-as user -- tmux-service hermes -- hermes gateway run --replace

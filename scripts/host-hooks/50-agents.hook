@@ -24,8 +24,8 @@
 #                 chroot has no systemd, so this is the "unit". See
 #                 scripts/tmux-service.sh.
 #
-# Requires agents_setup.sh to have installed tmux-service + run-as and the
-# per-agent toolchains (Node 24, uv). Attach to a running agent over ssh:
+# Requires agents_setup.sh to have installed tmux-service and the per-agent
+# toolchains (Node 24, uv); run-as comes from ssh_setup.sh. Attach over ssh:
 #   ssh moon-user -t tmux attach -t <name>
 set -e
 
