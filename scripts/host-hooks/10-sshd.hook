@@ -1,0 +1,40 @@
+#!/bin/sh
+# 10-sshd.hook — start OpenSSH inside the Ubuntu chroot at boot.
+#
+# Dispatched by ksu-moon-ssh/service.sh, which enters the chroot once and runs
+# every /etc/host-hooks/*.hook in lexical order. This hook runs as ROOT inside
+# the chroot. The "10-" prefix makes it run first, so its exit code is the one
+# service.sh surfaces — an sshd regression is never masked by a later hook.
+#
+# Enable/disable: rename the file. `sudo mv 10-sshd.hook 10-sshd.hook.disabled`
+# turns it off (the glob only matches *.hook); rename back to re-enable.
+#
+# Start-only: this assumes ssh_setup.sh has already provisioned the sshd_config
+# drop-in, the `user` account, and /home/user/.ssh/authorized_keys. Re-run
+# ssh_setup.sh after a rootfs rebuild or an authorized_keys edit — boot does
+# not re-provision.
+set -e
+
+# Safety net for the start-only model: refuse to launch sshd with stock
+# defaults (port 22, root login) if provisioning never ran. Without the
+# drop-in, a bare `sshd` would silently come up wrong.
+if [ ! -f /etc/ssh/sshd_config.d/10-moon.conf ]; then
+    echo "ERROR: sshd not provisioned (no /etc/ssh/sshd_config.d/10-moon.conf) — run ssh_setup.sh" >&2
+    exit 1
+fi
+
+install -d -m 0755 /var/run/sshd
+
+# Forcefully clean up any stale listeners before starting.
+pkill -9 -f '/usr/sbin/sshd' 2>/dev/null || true
+sleep 1
+/usr/sbin/sshd
+
+sleep 1
+echo --- sshd process ---
+ps -eo pid,user,cmd | grep -E 'sshd( |$)' | grep -v grep
+echo --- listening ---
+ss -ltnp 2>/dev/null | grep 2222 || echo "(ss not finding :2222 — trying netstat)"
+netstat -ltn 2>/dev/null | grep 2222 || echo "(netstat missing or not listening)"
+echo --- auth keys ---
+ls -la /home/user/.ssh/

@@ -1,19 +1,40 @@
 #!/system/bin/sh
-# moon-ssh: run at KSU late_start service — enter Ubuntu chroot, start sshd.
+# moon-ssh: run at KSU late_start service — enter the Ubuntu chroot once and
+# run the boot hooks.
 #
-# Depends on: /data/data/com.termux/files/home/{start_ubuntu.sh,ssh_setup.sh}
-# and the extracted Ubuntu rootfs at /data/data/com.termux/files/home/ubuntu.
-# Relies on the screen lock being disabled so CE storage auto-unlocks at boot
-# and /data/data/com.termux/ is reachable here (service.d timing is before
-# any user interaction).
+# Hook model (one file, one hook). Hooks live inside the chroot rootfs at
+# /etc/host-hooks/*.hook (Android-side path
+# $UBUNTU/etc/host-hooks/) so they can be managed in-chroot with plain
+# `sudo mv`/`sudo install` — no adb push, no chroot-escape, no /sdcard
+# staging. This script enters the chroot ONCE (via start_ubuntu.sh) and runs
+# every *.hook in lexical order as root inside it.
+#
+#   - One file per hook:   /etc/host-hooks/NN-<name>.hook  (NN orders them)
+#   - Enable / disable:    rename to NN-<name>.hook.disabled and back — the
+#                          glob below only matches *.hook (no sidecar files).
+#   - Run as another user: from inside a hook, `run-as <user> -- <cmd>`
+#                          (su -l <user> -s /bin/sh -c …; see scripts/run-as.sh).
+#   - Start-only:          hooks launch already-provisioned services. After a
+#                          rootfs rebuild or config change, re-run the relevant
+#                          *_setup.sh provisioning script — boot does not
+#                          re-provision.
+#
+# Core hooks shipped: 10-sshd, 20-tailscale (enabled), 50-agents (disabled by
+# default — deployed as 50-agents.hook.disabled). Sources: scripts/host-hooks/.
+#
+# Depends on: /data/data/com.termux/files/home/start_ubuntu.sh and the
+# extracted Ubuntu rootfs at /data/data/com.termux/files/home/ubuntu. Relies
+# on the screen lock being disabled so CE storage auto-unlocks at boot and
+# /data/data/com.termux/ is reachable here (service.d timing is before any
+# user interaction).
 
 # Two-stage logging.
 #
 # Stage 1 ($PRELOG, on /data DE storage) is always available at late_start, so
 # the polling preamble is recorded even if the chroot rootfs never comes up.
 # Stage 2 ($LOG, inside the chroot rootfs) starts once the chroot path is
-# verified — same architectural payoff as host-hooks/: `cat /var/log/moon-
-# ssh-boot.log` from inside the chroot reads the boot record, no adb hop.
+# verified — `cat /var/log/moon-ssh-boot.log` from inside the chroot reads the
+# boot record, no adb hop.
 #
 # History: 2026-05-07 (commit f7edfd1) initially `exec >`'d straight to $LOG.
 # At late_start, /data/data/com.termux/... can lag behind /data — the CE-
@@ -33,9 +54,8 @@ echo "uid=$(id -u) gid=$(id -g) context=$(cat /proc/self/attr/current 2>/dev/nul
 # Kernel hostname — Android init sets it to "localhost" by default. The chroot
 # shares the host UTS namespace, so this single call renames the Android shell
 # prompt, `uname -n`, and the chroot's `hostname` output in one shot. Ubuntu's
-# /etc/hostname inside the chroot is a separate file read by login shells — set
-# that too (start_ubuntu.sh writes it on every chroot entry, but set here for
-# any direct-chroot paths).
+# /etc/hostname inside the chroot is a separate file read by login shells;
+# start_ubuntu.sh writes it on every chroot entry.
 hostname moon
 
 # Defensive poll: even with CE auto-unlock, there is a brief window post-
@@ -61,46 +81,35 @@ cp "$PRELOG" "$LOG"
 exec >> "$LOG" 2>&1
 echo "=== moon-ssh: switched log from $PRELOG to $LOG at $(date) ==="
 
-# ssh_setup.sh internally execs start_ubuntu.sh with a heredoc payload that
-# configures sshd and launches it. Each *_setup.sh is its own chroot session
-# (exec replaces the shell, and when the heredoc ends the chroot exits),
-# so tailscale_setup.sh runs as a separate invocation afterwards. Both
-# daemons (sshd, tailscaled) are nohup/background inside their heredoc so
-# they survive the chroot exit.
-sh /data/data/com.termux/files/home/ssh_setup.sh
-rc_ssh=$?
-echo "=== ssh_setup.sh exited rc=$rc_ssh at $(date) ==="
-
-sh /data/data/com.termux/files/home/tailscale_setup.sh
-rc_ts=$?
-echo "=== tailscale_setup.sh exited rc=$rc_ts at $(date) ==="
-
-# Gated AI-agent launch. Noop by default — the operator opts in by touching
-# agents.enabled once they have agents configured in agents_start.sh. Keeps
-# boot quiet during setup iteration and gives a dead-simple kill switch
-# (`rm agents.enabled`) that doesn't require editing the KSU module.
+# Enter the chroot ONCE and run every enabled hook. start_ubuntu.sh sets up the
+# mounts/binds (suid remount, narrow /dev, /proc, DNS, …) and execs into a
+# login bash that reads this heredoc on stdin. The heredoc is quoted
+# ('CHROOT_CMD') so the loop body is evaluated entirely in-chroot, not by this
+# Android shell.
 #
-# Hook files live inside the chroot rootfs at /etc/host-hooks/ so they can
-# be managed in-chroot with plain `sudo cp` — no chroot-escape gymnastics.
-# We reach them from Android via the chroot's on-disk path. See
-# docs/05-agents.md §3 for the rationale.
-HOST_HOOKS=/data/data/com.termux/files/home/ubuntu/etc/host-hooks
-rc_ag=0
-if [ -e "$HOST_HOOKS/agents.enabled" ]; then
-    sh "$HOST_HOOKS/agents_start.sh"
-    rc_ag=$?
-    echo "=== agents_start.sh exited rc=$rc_ag at $(date) ==="
-else
-    echo "=== agents_start skipped (agents.enabled absent) ==="
-fi
+# Each hook runs in its own subshell so a `set -e` abort (or any failure) in
+# one hook can't abort the loop — the rest still run. The first non-zero rc
+# wins as our overall exit code; because hooks run in lexical order, the
+# lowest-numbered failing hook (10-sshd before 20-tailscale before 50-agents)
+# is the one surfaced, preserving "sshd regressions are never masked."
+sh /data/data/com.termux/files/home/start_ubuntu.sh << 'CHROOT_CMD'
+first_fail=0
+ran=0
+for h in /etc/host-hooks/*.hook; do
+    [ -e "$h" ] || continue   # no-match guard: glob stays literal when empty
+    ran=1
+    name=$(basename "$h")
+    echo "=== hook $name start $(date) ==="
+    ( sh "$h" ); rc=$?
+    echo "=== hook $name exited rc=$rc at $(date) ==="
+    if [ "$rc" -ne 0 ] && [ "$first_fail" -eq 0 ]; then
+        first_fail=$rc
+    fi
+done
+[ "$ran" -eq 0 ] && echo "=== no hooks in /etc/host-hooks (nothing to run) ==="
+exit $first_fail
+CHROOT_CMD
+rc=$?
 
-# Surface whichever failed; sshd being up is more critical, so its rc wins.
-# Agents failing to boot shouldn't mask an ssh/tailscale regression, so they
-# come last in the precedence chain.
-if [ "$rc_ssh" -ne 0 ]; then
-    exit $rc_ssh
-fi
-if [ "$rc_ts" -ne 0 ]; then
-    exit $rc_ts
-fi
-exit $rc_ag
+echo "=== moon-ssh: hooks finished rc=$rc at $(date) ==="
+exit $rc

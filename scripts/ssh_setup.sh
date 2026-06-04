@@ -15,6 +15,7 @@ KEYS=/data/data/com.termux/files/home/authorized_keys
 REBOOT_SH=/data/data/com.termux/files/home/reboot.sh
 ANDROID_LOCK_SH=/data/data/com.termux/files/home/android-lock.sh
 ANDROID_UNLOCK_SH=/data/data/com.termux/files/home/android-unlock.sh
+SSHD_HOOK=/data/data/com.termux/files/home/10-sshd.hook
 
 if [ ! -r "$KEYS" ]; then
     echo "ERROR: $KEYS missing — push config/authorized_keys first" >&2
@@ -28,6 +29,18 @@ if [ ! -r "$ANDROID_LOCK_SH" ] || [ ! -r "$ANDROID_UNLOCK_SH" ]; then
     echo "ERROR: android-lock.sh/android-unlock.sh missing — push scripts/android-{lock,unlock}.sh first" >&2
     exit 1
 fi
+if [ ! -r "$SSHD_HOOK" ]; then
+    echo "ERROR: $SSHD_HOOK missing — push scripts/host-hooks/10-sshd.hook first" >&2
+    exit 1
+fi
+
+# Deploy the boot hook (start-only sshd launcher) into the chroot. The hook is
+# what brings sshd up at boot — service.sh runs every /etc/host-hooks/*.hook.
+# Deploying it here (provisioning) keeps the rebuild flow foolproof: a chroot
+# rebuild rm's the rootfs (and the old hook with it), and re-running ssh_setup.sh
+# redeposits it. Iterate on the hook via `sudo install` (see INSTALLATION.md).
+install -d -m 0755 "$UBUNTU/etc/host-hooks"
+install -m 0755 "$SSHD_HOOK" "$UBUNTU/etc/host-hooks/10-sshd.hook"
 
 # Stage authorized_keys + reboot.sh + android-{lock,unlock}.sh from Android
 # side into a temporary location. All get moved into the chroot's final

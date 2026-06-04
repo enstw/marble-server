@@ -597,73 +597,75 @@ What `tmux-service` does:
 | Stop the service | `tmux kill-session -t <name>` |
 | Redeploy with new args | re-run `tmux-service <name> -- <new cmd>` |
 
-## 3. Autostart at boot (opt-in)
+## 3. Boot hooks
 
-Autostart is **off by default**. Boot-time hooks live at `/etc/host-hooks/` *inside the chroot* — Android-side path `/data/data/com.termux/files/home/ubuntu/etc/host-hooks/`. The directory is the general-purpose drop-in point for any host-fired hook (see `ksu-moon-ssh/service.sh`); agents are the first occupant.
-
-The chroot rootfs lives on Android FS at `$UBUNTU=/data/data/com.termux/files/home/ubuntu` (per `start_ubuntu.sh:9`). Pointing `service.sh` (Android context) at a path inside that rootfs lets you manage hooks from inside the chroot with `sudo` — no `adb push`, no chroot-escape, no /sdcard staging. The shebang on `agents_start.sh` stays `/system/bin/sh` because the script itself is still Android-side glue that execs `start_ubuntu.sh`; only its on-disk location moves.
-
-Opt in with a touch-file so you can add/remove without editing scripts:
+`ksu-moon-ssh/service.sh` (KSU `late_start service`) enters the chroot **once** and runs every hook in `/etc/host-hooks/*.hook` in lexical order, as root inside the chroot. One file = one hook; the numeric prefix orders them.
 
 ```
-sudo touch /etc/host-hooks/agents.enabled
+/etc/host-hooks/
+  10-sshd.hook            # start sshd        (enabled)
+  20-tailscale.hook       # bring tailscaled up (enabled)
+  50-agents.hook.disabled # launch AI agents   (disabled by default)
 ```
 
-Disable:
+Android-side these are under `$UBUNTU/etc/host-hooks/` (`$UBUNTU=/data/data/com.termux/files/home/ubuntu`, per `start_ubuntu.sh:9`). Living inside the rootfs means you manage them in-chroot with plain `sudo` — no `adb push`, no chroot-escape, no /sdcard staging. Sources of truth are `scripts/host-hooks/*.hook` in the repo.
+
+**Enable / disable — rename:**
 
 ```
-sudo rm /etc/host-hooks/agents.enabled
+sudo mv /etc/host-hooks/50-agents.hook.disabled /etc/host-hooks/50-agents.hook   # enable
+sudo mv /etc/host-hooks/50-agents.hook /etc/host-hooks/50-agents.hook.disabled   # disable
 ```
 
-When the flag is present, `ksu-moon-ssh/service.sh` runs `/etc/host-hooks/agents_start.sh` after sshd and tailscale at `late_start service`. sshd/tailscale exit codes take precedence in the boot log — an agent failing to launch will not mask an ssh regression.
+The runner globs `*.hook`, so a `.disabled` suffix takes the file out of the boot set without deleting it. `rm` is the kill switch; rename is the reversible toggle.
+
+**Run as another user — `run-as`:** hooks run as root inside the chroot. To launch something as the non-root `user`, call `run-as <user> -- <cmd>` (a thin `su -l <user> -s /bin/sh -c …` wrapper; see `scripts/run-as.sh`, installed to `/usr/local/sbin/run-as` by `agents_setup.sh`). `-l` gives the agent a clean login env + the user's PATH (`~/.local/bin` for uv, etc.).
+
+**Start-only:** hooks launch *already-provisioned* services — boot does **not** re-provision. After a rootfs rebuild or a config/key change, re-run the matching `*_setup.sh` (e.g. edit `config/authorized_keys` → re-run `ssh_setup.sh`; a bare reboot won't pick the edit up). `10-sshd.hook` refuses to start if `ssh_setup.sh` never ran (no `sshd_config.d/10-moon.conf`), so a missing provision fails loudly instead of bringing sshd up on stock defaults.
+
+**Exit codes:** each hook runs in its own subshell, so one hook's failure can't abort the loop. The first non-zero rc becomes `service.sh`'s exit code; because hooks run in numeric order, `10-sshd` is surfaced before `20-tailscale` before `50-agents` — an agent failing to launch never masks an sshd regression.
+
+### Deploying / updating hooks
+
+The `*_setup.sh` provisioning scripts deploy the hooks automatically, so you rarely deploy by hand: `ssh_setup.sh` installs `10-sshd.hook`, `tailscale_setup.sh` installs `20-tailscale.hook`, and `agents_setup.sh` installs `50-agents.hook.disabled` (off by default, and never clobbers an already-enabled copy). Each reads the hook from Termux home (`/data/data/com.termux/files/home/<hook>`), so push `scripts/host-hooks/*.hook` there alongside the setup scripts. This is what keeps a chroot rebuild foolproof — the rebuild sequence re-runs those scripts and the hooks come back with the rootfs.
+
+To iterate on a single hook without re-running full provisioning, install it from a checkout reachable in-chroot:
+
+```
+sudo install -m 0755 scripts/host-hooks/10-sshd.hook /etc/host-hooks/10-sshd.hook
+```
+
+`sh -n scripts/host-hooks/<file>.hook` parse-checks without side effects. Running a hook by hand re-applies it (`tmux-service` does a clean kill+redeploy on each invocation, see § 2); don't run it just to test syntax.
 
 ### Configuring which agents start
 
-Edit `scripts/agents_start.sh` in the repo and `sudo cp` it to `/etc/host-hooks/`. One line per agent, run as the owning user. FreelOAder + Hermes are wired up by default (2026-05-07), in that order:
+Edit `scripts/host-hooks/50-agents.hook`. One line per agent via `run-as`. FreelOAder + Hermes are wired up by default (2026-05-07), in that order:
 
 ```sh
-su -l user -s /bin/sh -c 'tmux-service freeloader -- sh -c "cd /home/user/freeloader && exec .venv/bin/uvicorn freeloader.frontend.app:create_app --factory --host 127.0.0.1 --port 8000"'
-su -l user -s /bin/sh -c 'tmux-service hermes -- hermes gateway run --replace'
+run-as user -- tmux-service freeloader -- sh -c 'cd /home/user/freeloader && exec .venv/bin/uvicorn freeloader.server:create_default_app --factory --host 127.0.0.1 --port 8000'
+run-as user -- tmux-service hermes -- hermes gateway run --replace
 ```
 
 FreelOAder-specific gotchas:
 
 - **Order matters.** `~/.hermes/config.yaml` points `base_url` at `http://127.0.0.1:8000/v1`. Hermes tolerates initial-connect retries, but bringing FreelOAder up first avoids a noisy first turn after boot.
-- **`--factory`.** `freeloader.frontend.app:create_app` is a factory function (it constructs a `Router` from `load_router_config()`), not a module-level `app`. Without `--factory`, uvicorn tries to import an attribute that doesn't exist.
+- **`--factory`.** `freeloader.server:create_default_app` is a factory function (it constructs the app from `load_router_config()`), not a module-level `app`. Without `--factory`, uvicorn tries to import an attribute that doesn't exist.
 - **`cd /home/user/freeloader` is load-bearing.** `.venv/bin/uvicorn` is relative, and `freeloader.toml` (when present) is resolved from cwd before falling back to `~/.local/share/freeloader/freeloader.toml`.
 - **Editable install survives reboot, build cache does not.** `.venv/lib/.../site-packages/_editable_impl_freeloader.pth` points at `src/`, so no rebuild is needed at boot. If you ever re-run `uv sync`, see freeloader's `README.md` § "Run the server" for the f2fs/SELinux build-cache trap.
-- **Port / factory-path changes touch four spots.** `127.0.0.1:8000` and the `--factory` target are encoded in (a) the live `tmux-service` invocation, (b) `scripts/agents_start.sh` here, (c) the deployed copy at `/etc/host-hooks/agents_start.sh`, AND (d) `~/.hermes/config.yaml`'s `base_url`. Change any without the others and Hermes either can't connect or hits a stale gateway.
+- **Port / factory-path changes touch four spots.** `127.0.0.1:8000` and the `--factory` target are encoded in (a) the live `tmux-service` invocation, (b) `scripts/host-hooks/50-agents.hook` here, (c) the deployed copy at `/etc/host-hooks/50-agents.hook`, AND (d) `~/.hermes/config.yaml`'s `base_url`. Change any without the others and Hermes either can't connect or hits a stale gateway.
 
 Hermes-specific gotcha: `hermes gateway install` writes a systemd-user unit at `~/.config/systemd/user/hermes-gateway.service` and `hermes gateway start` invokes that unit. Both are dead in this chroot — no PID 1 / no systemd-user. Use `hermes gateway run` (Hermes flags as "recommended for WSL, Docker, Termux") and let `tmux-service` supply the supervisor layer. `--replace` clears any lingering hermes process from a prior boot before binding the gateway socket. If you ran `hermes gateway install` before this migration, `rm ~/.config/systemd/user/hermes-gateway.service` to clean up — `hermes gateway uninstall` itself trips on `systemctl --user daemon-reload`, so the rm is the working uninstall path here.
 
 OpenClaw remains optional — pattern is the same:
 
 ```sh
-su -l user -s /bin/sh -c 'tmux-service openclaw -- openclaw gateway --port 18789'
+run-as user -- tmux-service openclaw -- openclaw gateway --port 18789
 ```
-
-Deploy from inside the chroot:
-
-```
-sudo install -d /etc/host-hooks
-sudo cp scripts/agents_start.sh /etc/host-hooks/agents_start.sh
-sudo sh /etc/host-hooks/agents_start.sh    # optional dry-run
-```
-
-Re-pushing after edits is just the second `cp`. The hook file's on-disk path is fixed; iterate on the source in the repo and copy over. The deployed copy is root-owned but world-readable (`chmod go+r`), so a non-root checkout can verify-without-sudo:
-
-```
-cmp /etc/host-hooks/agents_start.sh scripts/agents_start.sh   # deployed matches repo
-ls /etc/host-hooks/agents.enabled                              # autostart on
-sudo grep agents_start /var/log/moon-ssh-boot.log              # boot-time trace (Android-side log, sudo only)
-```
-
-Re-running `/etc/host-hooks/agents_start.sh` by hand kill+restarts every wired-up service — `tmux-service` does a clean redeploy on each invocation (see § 2). Don't trigger it just to test syntax; `sh -n /etc/host-hooks/agents_start.sh` parse-checks without side effects.
 
 Then reboot (or power-cycle) and confirm:
 
 ```
-ssh moon grep agents_start /var/log/moon-ssh-boot.log
+ssh moon grep 'hook 50-agents' /var/log/moon-ssh-boot.log   # boot-time trace
 ssh moon-user -t tmux ls
 ```
 
@@ -684,8 +686,8 @@ With the groundwork in place, adding an agent is:
 
 1. Install the agent (inside the chroot as `user`) — e.g. `npm i -g openclaw` or `uv tool install hermes` / upstream installer.
 1. First-run configuration (API keys, pairing, whatever the agent's onboarding requires).
-1. Add a `tmux-service <name> -- <start-cmd>` line to `scripts/agents_start.sh` and `sudo cp` it to `/etc/host-hooks/`.
-1. `sudo touch /etc/host-hooks/agents.enabled` if not already done.
+1. Add a `run-as user -- tmux-service <name> -- <start-cmd>` line to `scripts/host-hooks/50-agents.hook` and `sudo install` it to `/etc/host-hooks/`.
+1. `sudo mv /etc/host-hooks/50-agents.hook.disabled /etc/host-hooks/50-agents.hook` to enable, if not already.
 
 Per-agent playbooks (OpenClaw, Hermes) live in their own phase docs — this one stops at groundwork.
 
@@ -693,7 +695,7 @@ Per-agent playbooks (OpenClaw, Hermes) live in their own phase docs — this one
 
 - **Log growth is unbounded.** `tee -a` keeps appending. Rotate manually (`truncate -s 0 ~/.local/state/moon-agents/<name>.log`) or drop a `logrotate` snippet in `/etc/logrotate.d/moon-agents` if an agent turns chatty.
 - **Crash-loop storms aren't surfaced.** If an agent crashes every 2 s, only the log shows it. Future: add a simple rate-check in `tmux-service` that bails after N crashes in M seconds. Defer until it bites.
-- **tmux server dies on reboot.** Expected — sessions are in-memory. Boot-time launch recreates them. If you reboot without `agents.enabled` set, no services come back.
+- **tmux server dies on reboot.** Expected — sessions are in-memory. Boot-time launch recreates them. If `50-agents.hook` is disabled (`.disabled` suffix), no agent services come back after a reboot.
 - **Node 24 from NodeSource pins major.** When Node 26+ comes out and an agent needs it, bump the repo line in `agents_setup.sh` (`node_24.x` → `node_26.x`) and re-run.
 - **`uv` installer fetches the latest release.** Pinned by the Astral install script, not by us. Re-running `agents_setup.sh` will upgrade `uv` in place; revert by `uv self update <old>` if an upgrade breaks a pinned tool.
 

@@ -55,9 +55,10 @@ All aliases land **inside the chroot**. OpenSSH is non-root by design (`PermitRo
 | Tailscale identity | `/var/lib/tailscale/tailscaled.state` (inside chroot) | reboots; lost if chroot rebuilt |
 | `user` account + home | `/etc/passwd`, `/home/user/` (inside chroot) | reboots; re-provisioned (locked) by `ssh_setup.sh` on chroot rebuild |
 | `user` password hash | `/etc/shadow` (inside chroot) | reboots; **lost on chroot rebuild** — re-run `passwd user` once to re-enable sudo |
-| SSH authorized_keys (user) | `/home/user/.ssh/authorized_keys` (inside chroot) | reboots; re-installed from the gitignored live `config/authorized_keys` by `ssh_setup.sh` on every invocation. **Do not edit manually in the chroot — edits will be wiped on reboot.** |
+| SSH authorized_keys (user) | `/home/user/.ssh/authorized_keys` (inside chroot) | reboots; re-installed from the gitignored live `config/authorized_keys` each time `ssh_setup.sh` runs. Boot hooks are start-only (`10-sshd.hook` does not re-provision), so a manual in-chroot edit now **survives reboot** — but it is overwritten the next time you run `ssh_setup.sh` (rebuild or key rotation). Rotate keys by editing `config/authorized_keys` and re-running `ssh_setup.sh`, not by editing in the chroot. |
 | KSU module | `/data/adb/modules/moon-ssh/` | reboots, Lineage OTAs, factory reset wipes |
-| On-device script copies | `/data/data/com.termux/files/home/{start_ubuntu,ssh_setup,tailscale_setup,reboot,android-lock,android-unlock}.sh` + `authorized_keys` | reboots |
+| On-device script copies | `/data/data/com.termux/files/home/{start_ubuntu,ssh_setup,tailscale_setup,agents_setup,reboot,android-lock,android-unlock,tmux-service,run-as}.sh` + `authorized_keys` + `{10-sshd,20-tailscale,50-agents}.hook` | reboots |
+| Boot hooks (deployed) | `/etc/host-hooks/*.hook` (inside chroot) | reboots; **lost on chroot rebuild** — redeployed by the matching `*_setup.sh` (run in the rebuild sequence). `.disabled` enable/disable state is preserved across re-runs |
 
 ### Manual restart
 
@@ -201,7 +202,7 @@ Check https://github.com/KernelSU-Next/KernelSU-Next/releases for a new APK. Ins
 1. `adb shell cat /data/data/com.termux/files/home/ubuntu/var/log/moon-ssh-boot.log` (chroot's `/var/log/moon-ssh-boot.log` viewed from Android — needed because SSH is down)
     - **Log missing or empty:** module didn't run, OR `service.sh` died before its stage-2 log handoff (in which case the polling preamble is at `/data/local/tmp/moon-ssh-boot.log` — `adb shell cat` that next). KSU Manager → Modules → is `moon-ssh` **enabled**? Did KSU itself boot (Manager shows `Working LKM`)? If not, §2.1 re-KSU or §4 recover.
     - **`ERROR: /data/data/com.termux/files/home never appeared`:** CE storage didn't unlock in time. Read the rest of the preamble at `/data/local/tmp/moon-ssh-boot.log`. Did a screen lock PIN get re-enabled? Remove it. Or bump the poll timeout in `service.sh` from 10s → 30s.
-    - **`ssh_setup.sh exited rc=<nonzero>`:** run it manually and read stderr — `adb shell su -c 'sh /data/data/com.termux/files/home/ssh_setup.sh'`.
+    - **`hook 10-sshd.hook exited rc=<nonzero>`:** the start-only sshd hook failed. `rc=1` with `sshd not provisioned` means `ssh_setup.sh` never ran on this rootfs — run it: `adb shell su -c 'sh /data/data/com.termux/files/home/ssh_setup.sh'`. Otherwise read the hook's stderr in the boot log. (Hooks are surfaced in lexical order, so `10-sshd`'s rc wins over `20-tailscale`/`50-agents`.)
 
 1. If the log shows both rc=0 but SSH still fails — check LAN: is the phone still at `MOON_LAN_HOST`? Router DHCP reservation might have drifted. Use `tailscale ssh root@moon` (MagicDNS) in the meantime.
 

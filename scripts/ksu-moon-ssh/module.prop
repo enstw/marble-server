@@ -1,6 +1,6 @@
 id=moon-ssh
 name=Moon SSH Autostart
-version=v0.3.1
-versionCode=4
+version=v0.4.0
+versionCode=5
 author=jay
-description=Enters the Ubuntu 26.04 chroot at /data/data/com.termux/files/home/ubuntu and starts sshd on port 2222 at boot. Invokes ssh_setup.sh. Log at /var/log/moon-ssh-boot.log (in-chroot path; preamble at /data/local/tmp/moon-ssh-boot.log until the chroot path is reachable).
+description=Enters the Ubuntu 26.04 chroot at /data/data/com.termux/files/home/ubuntu once at boot and runs the hooks in /etc/host-hooks/*.hook (lexical order, as root). Ships 10-sshd + 20-tailscale enabled, 50-agents disabled. Disable a hook by renaming it to *.hook.disabled. Log at /var/log/moon-ssh-boot.log (in-chroot path; preamble at /data/local/tmp/moon-ssh-boot.log until the chroot path is reachable).

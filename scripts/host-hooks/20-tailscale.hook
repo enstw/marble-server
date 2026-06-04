@@ -1,23 +1,11 @@
-#!/system/bin/sh
-# tailscale_setup.sh — bring up tailscaled inside the chroot, and deploy the
-# 20-tailscale.hook boot hook so it comes up at boot too. Invoke from Android:
-#   adb shell su -c 'sh /data/data/com.termux/files/home/tailscale_setup.sh'
-set -e
-
-UBUNTU=/data/data/com.termux/files/home/ubuntu
-TS_HOOK=/data/data/com.termux/files/home/20-tailscale.hook
-
-# Deploy the boot hook (start-only tailscaled launcher) into the chroot, so a
-# rebuild that rm's the rootfs gets the hook redeposited by re-running this
-# script. service.sh runs every /etc/host-hooks/*.hook at boot.
-if [ ! -r "$TS_HOOK" ]; then
-    echo "ERROR: $TS_HOOK missing — push scripts/host-hooks/20-tailscale.hook first" >&2
-    exit 1
-fi
-install -d -m 0755 "$UBUNTU/etc/host-hooks"
-install -m 0755 "$TS_HOOK" "$UBUNTU/etc/host-hooks/20-tailscale.hook"
-
-exec sh /data/data/com.termux/files/home/start_ubuntu.sh << 'CHROOT_CMD'
+#!/bin/sh
+# 20-tailscale.hook — bring up tailscaled (userspace networking) at boot.
+#
+# Dispatched by ksu-moon-ssh/service.sh inside the chroot; runs as ROOT. Runs
+# after 10-sshd so a tailscaled flap can't mask an sshd regression in the
+# exit code service.sh reports.
+#
+# Enable/disable: rename to 20-tailscale.hook.disabled (and back).
 set -e
 
 # Identity + prefs (hostname, --ssh) persist in tailscaled.state, so a fresh
@@ -63,4 +51,3 @@ echo --- tailscaled process ---
 ps -eo pid,user,cmd | grep -E 'tailscaled( |$)' | grep -v grep || echo "(tailscaled not running)"
 echo --- tailscale status ---
 /usr/bin/tailscale --socket=/var/run/tailscale/tailscaled.sock status 2>&1 | head -20 || echo "(tailscale status failed)"
-CHROOT_CMD

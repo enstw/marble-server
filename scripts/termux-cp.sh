@@ -8,9 +8,9 @@
 # normally means `adb push`. This script is the in-chroot alternative for
 # when you're already on the device.
 #
-# Boot-time HOOKS (agents_start.sh, agents.enabled, …) do NOT need this
-# anymore — they live at /etc/host-hooks/ inside the chroot and are
-# managed with `sudo cp` directly. See docs/05-agents.md §3.
+# Boot-time HOOKS (/etc/host-hooks/*.hook) do NOT need this — they live inside
+# the chroot and are managed in-chroot with `sudo install`/`sudo mv` directly.
+# See docs/INSTALLATION.md § "Autostart at boot".
 #
 #   1. Stage the file on /sdcard (FUSE — writable from chroot).
 #   2. chroot into PID 1's root (real Android FS — see android-lock.sh for
