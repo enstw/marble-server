@@ -36,7 +36,7 @@ Turning a Xiaomi Poco F5 5G (`marble`, Snapdragon 7+ Gen 2) into a headless ARM6
   - `ssh_setup.sh` — configure OpenSSH on port 2222, idempotently provision the non-root `user` account from the gitignored `config/authorized_keys` allowlist
   - `tailscale_setup.sh` — start `tailscaled` in userspace-networking mode
   - `agents_setup.sh` — install AI-agent toolchains (tmux, Node 24, uv) + the `tmux-service` and `run-as` helpers
-  - `host-hooks/` — source-of-truth for the boot hooks deployed to `/etc/host-hooks/*.hook` (run once per boot, in lexical order, inside the chroot): `10-sshd`, `20-tailscale`, `50-agents`. Enable/disable by `.disabled` rename; see `docs/INSTALLATION.md` § "Boot hooks"
+  - `host-hooks/` — source-of-truth for the boot hooks deployed to `/etc/host-hooks/*.hook` (run once per boot, in lexical order, inside the chroot): `10-sshd`, `20-tailscale`, `50-agents`. Enable/disable by `.disabled` rename; see `host-hooks/README.md` for the hook contract and `docs/INSTALLATION.md` § "Boot hooks" for the full playbook
   - `run-as.sh` — source-of-truth for `/usr/local/sbin/run-as`: drop privileges to a target user (`run-as <user> -- <cmd>`), used by `50-agents.hook`
   - `tmux-service.sh` — source-of-truth for `/usr/local/bin/tmux-service`: run a command in a detached tmux session with crash-loop recovery and log tee
   - `android-lock.sh`, `android-unlock.sh` — manual screen-off / wake over the chroot-escape path (counter to screen-off CPU throttling; see `docs/MAINTENANCE.md` §1)
