@@ -23,5 +23,5 @@ install -m 0755 "$TS_HOOK" "$UBUNTU/etc/host-hooks/20-tailscale.hook"
 
 # Enter the chroot and run the hook we just deployed.
 exec sh /data/data/com.termux/files/home/start_ubuntu.sh << 'CHROOT_CMD'
-exec sh /etc/host-hooks/20-tailscale.hook
+exec /etc/host-hooks/20-tailscale.hook   # exec directly so the hook honors its own shebang, as service.sh does
 CHROOT_CMD

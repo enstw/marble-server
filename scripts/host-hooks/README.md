@@ -25,8 +25,9 @@ Numeric prefix = run order. Keep gaps (10/20/50) so new hooks can slot between.
 ## The contract
 
 - **Runs as root, inside the chroot.** The chroot mounts/binds are already set
-  up by `start_ubuntu.sh`; a hook is a plain in-chroot script. Use `#!/bin/sh`
-  unless you need bash.
+  up by `start_ubuntu.sh`; a hook is a plain in-chroot script. The runner execs
+  the hook directly (they ship `0755`), so it honors the shebang: use `#!/bin/sh`
+  by default, or `#!/bin/bash` if you need bash.
 - **Drop privileges with `run-as`.** To run something as the non-root `user`:
   `run-as user -- <cmd>` (= `su -l user -s /bin/sh -c …`; see `../run-as.sh`).
   Don't hand-roll `su` — `run-as` gets the login env, shell, and quoting right.

@@ -259,5 +259,5 @@ fi
 # boot). Provisioning thus leaves a live sshd exactly as a boot would bring up,
 # and there's no start/verify logic duplicated between this script and the hook.
 # The hook's provisioning guard passes — 10-moon.conf was just written above.
-sh /etc/host-hooks/10-sshd.hook
+/etc/host-hooks/10-sshd.hook   # exec directly so the hook honors its own shebang, as service.sh does
 CHROOT_CMD
