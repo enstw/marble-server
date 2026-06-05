@@ -195,6 +195,25 @@ Safe anytime — Tailscale binaries are statically-linked Go, so staying on `nob
 
 Check https://github.com/KernelSU-Next/KernelSU-Next/releases for a new APK. Install with `adb install -r <new>.apk` (standard variant, not `spoofed`). Manager updates the userspace side only — the LKM kernel module inside boot.img does not need re-patching unless release notes say the LKM changed (rare).
 
+### 2.6 Boot-hook model migration (applied 2026-06-05, **pending reboot**)
+
+Live box migrated from the old monolithic KSU `service.sh` (which re-ran `ssh_setup.sh` + `tailscale_setup.sh` + gated `agents_start.sh` at boot) to the new one-file-per-hook model (repo refactor `975c049`…`6be3a24`). **Done in-chroot; not yet rebooted — the switch takes effect on the next reboot.**
+
+What changed on the device:
+- `/etc/host-hooks/`: installed `10-sshd.hook` + `20-tailscale.hook` (enabled) and `50-agents.hook.disabled`; removed the old `agents.enabled` + `agents_start.sh`.
+- `/usr/local/sbin/run-as` installed (new baseline privilege-drop helper).
+- `/data/adb/modules/moon-ssh/{service.sh,module.prop}` → **v0.4.0** (generic hook runner), copied via the chroot-escape in `INSTALLATION.md` § "Autostart at boot".
+- New files re-staged into Termux home so a rootfs rebuild / Android-side re-provision redeposits the new model.
+
+**Agents are OFF:** `50-agents` ships `.disabled`, so freeloader + hermes will **not** auto-start after reboot (they keep running only until the reboot). To restore: uncomment the freeloader + hermes lines in `/etc/host-hooks/50-agents.hook.disabled`, then `sudo mv` it to `…/50-agents.hook`. Note freeloader's entrypoint is now `freeloader.server:create_default_app` (was `freeloader.frontend.app:create_app`) — verify it serves on `127.0.0.1:8000`.
+
+Verify after the reboot:
+```
+ssh moon cat /var/log/moon-ssh-boot.log   # "=== hook 10-sshd start ===" + "=== hook 20-tailscale start ==="; final rc=0
+ssh moon ss -ltn | grep 2222              # sshd up
+ssh moon tailscale status                 # node Connected
+```
+
 ## 3. Troubleshooting
 
 ### `ssh moon` times out after a reboot
