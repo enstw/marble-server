@@ -33,7 +33,7 @@ Consolidated architectural findings and historical gotchas from the marble-serve
 
 - **Lineage Defaults are Optimal:** Extensive load testing showed that LineageOS's default CPU governor (`walt`) and I/O scheduler (`bfq`) scale perfectly under load. The X2 prime core easily hits 2.91 GHz when needed. No manual tweaking of cpufreq or cpusets is necessary.
 - **Screen-Off Throttling Mitigation:** Keeping the device plugged in with Developer Options **Stay awake while charging** enabled is the definitive fix for CPU throttling.
-- **Manual Lock/Unlock Escapes:** The `android-lock.sh` and `android-unlock.sh` scripts handle ad-hoc screen management. They use absolute paths dynamically linked to `/system/bin/linker64` and must run outside the chroot (escaped via `chroot /proc/1/root`).
+- **Manual Lock/Unlock Escapes:** The `android.sh` dispatcher (`android lock` / `android unlock`) handles ad-hoc screen management. Its subcommands invoke Android binaries (`input`/`wm`/`svc`) that are dynamically linked to `/system/bin/linker64` (absolute path) and must run outside the chroot (escaped via `chroot /proc/1/root`).
 
 ## 5. AI Agents
 

@@ -255,8 +255,8 @@ adb shell su -c 'sh /data/data/com.termux/files/home/ssh_setup.sh'
 1. Stages the gitignored live `config/authorized_keys` file into `/home/user/.ssh/authorized_keys`. Start from `config/authorized_keys.example`, add local public keys, and re-push after key rotation — never bake keys into the script.
 1. Writes `/etc/ssh/sshd_config.d/10-moon.conf`: `Port 2222`, `ListenAddress 0.0.0.0`, `PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`. OpenSSH is pubkey-only and non-root; root administration goes through `sudo`, `adb shell su`, or Tailscale identity SSH where configured.
 1. Installs `/usr/local/sbin/reboot` from the repo-tracked `scripts/reboot.sh`. Shadows Ubuntu's systemd-wrapper `/sbin/reboot` — in-chroot `reboot(2)` works (we have `CAP_SYS_BOOT`) but bypasses Android init's graceful-shutdown sequence, and SSH hangs because the kernel panics before sshd can close the TCP socket. The script hops out to Android's init via `/proc/1/root`, schedules toybox `reboot` detached, then SIGHUPs the per-session sshd so the SSH client returns within tens of ms. Lives under `/usr/local/sbin` which dpkg/apt never touch, so it survives package upgrades. Earlier revisions kept two reboot scripts (a slow stdio-EOF shim here plus a separate fast SIGHUP variant at `/root/reboot.sh`); the current script collapses them — `ssh_setup.sh` removes the stale `/root/reboot.sh` and `/etc/sudoers.d/50-reboot` on re-run.
-1. Installs `/usr/local/sbin/{android-lock,android-unlock}` from the repo-tracked `scripts/android-{lock,unlock}.sh`. Same chroot-escape pattern as `reboot` — they reach `/system/bin/input` / `wm` / `svc` via `chroot /proc/1/root`, so they need `CAP_SYS_CHROOT` and live in root-only territory.
-1. Writes `/etc/sudoers.d/50-moon-helpers` granting `user` NOPASSWD on `/usr/local/sbin/{reboot,android-lock,android-unlock}` (three explicit-path stanzas, no globbing), and drops thin `exec sudo` wrappers at `/usr/local/bin/{reboot,android-lock,android-unlock}`. The wrappers put the commands in default PATH everywhere — `ssh moon-user reboot`, bare `reboot` in an interactive shell, scripted invocations, all work without aliases or PATH gymnastics.
+1. Installs `/usr/local/sbin/android` from the repo-tracked `scripts/android.sh` — a single dispatcher with `lock` / `unlock [--stayon]` subcommands (consolidated from the former split `android-lock` / `android-unlock` commands; re-runs delete the old `/usr/local/{sbin,bin}/android-{lock,unlock}` binaries). Same chroot-escape pattern as `reboot` — it reaches `/system/bin/input` / `wm` / `svc` via `chroot /proc/1/root`, so it needs `CAP_SYS_CHROOT` and lives in root-only territory.
+1. Writes `/etc/sudoers.d/50-moon-helpers` granting `user` NOPASSWD on `/usr/local/sbin/{reboot,android}` (two explicit-path stanzas, no globbing — the single `android` stanza covers all its subcommands), and drops thin `exec sudo` wrappers at `/usr/local/bin/{reboot,android}`. The wrappers put the commands in default PATH everywhere — `ssh moon-user reboot`, `ssh moon-user android lock`, bare `reboot` in an interactive shell, scripted invocations, all work without aliases or PATH gymnastics.
 1. Kills any prior `/usr/sbin/sshd` and relaunches it. sshd daemonizes; the `nohup` is implicit via the heredoc exec model.
 
 Expected output ends with `ss`/`netstat` showing `:2222` in `LISTEN` and `ls /home/user/.ssh/` showing `authorized_keys` mode 600.
@@ -291,7 +291,7 @@ Install (from a workstation with adb):
 ```
 adb push scripts/ssh_setup.sh scripts/tailscale_setup.sh \
          config/authorized_keys scripts/reboot.sh \
-         scripts/android-lock.sh scripts/android-unlock.sh \
+         scripts/android.sh \
          /data/data/com.termux/files/home/
 adb shell su -c 'mkdir -p /data/adb/modules/moon-ssh'
 adb push scripts/ksu-moon-ssh/module.prop scripts/ksu-moon-ssh/service.sh \

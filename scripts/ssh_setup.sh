@@ -13,8 +13,7 @@ set -e
 UBUNTU=/data/data/com.termux/files/home/ubuntu
 KEYS=/data/data/com.termux/files/home/authorized_keys
 REBOOT_SH=/data/data/com.termux/files/home/reboot.sh
-ANDROID_LOCK_SH=/data/data/com.termux/files/home/android-lock.sh
-ANDROID_UNLOCK_SH=/data/data/com.termux/files/home/android-unlock.sh
+ANDROID_SH=/data/data/com.termux/files/home/android.sh
 SSHD_HOOK=/data/data/com.termux/files/home/10-sshd.hook
 RUNAS_SH=/data/data/com.termux/files/home/run-as.sh
 
@@ -26,8 +25,8 @@ if [ ! -r "$REBOOT_SH" ]; then
     echo "ERROR: $REBOOT_SH missing — push scripts/reboot.sh first" >&2
     exit 1
 fi
-if [ ! -r "$ANDROID_LOCK_SH" ] || [ ! -r "$ANDROID_UNLOCK_SH" ]; then
-    echo "ERROR: android-lock.sh/android-unlock.sh missing — push scripts/android-{lock,unlock}.sh first" >&2
+if [ ! -r "$ANDROID_SH" ]; then
+    echo "ERROR: $ANDROID_SH missing — push scripts/android.sh first" >&2
     exit 1
 fi
 if [ ! -r "$SSHD_HOOK" ]; then
@@ -51,17 +50,15 @@ install -m 0755 "$SSHD_HOOK" "$UBUNTU/etc/host-hooks/10-sshd.hook"
 # to run a command as a non-root user (`run-as <user> -- <cmd>`), so it belongs
 # with the baseline provisioning, not the opt-in agent toolchain — a hook can
 # rely on it being present even if agents_setup.sh was never run. Sits in
-# /usr/local/sbin alongside the reboot/android-lock/unlock helpers below.
+# /usr/local/sbin alongside the reboot/android helpers below.
 install -m 0755 "$RUNAS_SH" "$UBUNTU/usr/local/sbin/run-as"
 
-# Stage authorized_keys + reboot.sh + android-{lock,unlock}.sh from Android
-# side into a temporary location. All get moved into the chroot's final
-# locations below.
+# Stage authorized_keys + reboot.sh + android.sh from Android side into a
+# temporary location. All get moved into the chroot's final locations below.
 install -d -m 1777 "$UBUNTU/tmp"
 install -m 0600 "$KEYS" "$UBUNTU/tmp/authorized_keys"
 install -m 0755 "$REBOOT_SH" "$UBUNTU/tmp/reboot"
-install -m 0755 "$ANDROID_LOCK_SH" "$UBUNTU/tmp/android-lock"
-install -m 0755 "$ANDROID_UNLOCK_SH" "$UBUNTU/tmp/android-unlock"
+install -m 0755 "$ANDROID_SH" "$UBUNTU/tmp/android"
 
 exec sh /data/data/com.termux/files/home/start_ubuntu.sh << 'CHROOT_CMD'
 set -e
@@ -207,31 +204,37 @@ rm -f /tmp/authorized_keys
 install -m 0755 -o root -g root /tmp/reboot /usr/local/sbin/reboot
 rm -f /tmp/reboot
 
-# Install android-lock / android-unlock. Same pattern — these self-escape via
-# chroot /proc/1/root (CAP_SYS_CHROOT needed), so the real scripts live in
-# root-only territory and PATH wrappers + NOPASSWD sudoers give `user` access.
-install -m 0755 -o root -g root /tmp/android-lock /usr/local/sbin/android-lock
-install -m 0755 -o root -g root /tmp/android-unlock /usr/local/sbin/android-unlock
-rm -f /tmp/android-lock /tmp/android-unlock
+# Install the `android` dispatcher (subcommands: lock, unlock). Same pattern —
+# it self-escapes via chroot /proc/1/root (CAP_SYS_CHROOT needed), so the real
+# script lives in root-only territory and a PATH wrapper + NOPASSWD sudoers
+# give `user` access. Source: scripts/android.sh.
+install -m 0755 -o root -g root /tmp/android /usr/local/sbin/android
+rm -f /tmp/android
+# Drop the pre-consolidation split commands (android-lock / android-unlock)
+# left by earlier revisions. Safe to remove unconditionally — re-runs re-create
+# everything still needed, and the stale sudoers lines are gone the moment the
+# 50-moon-helpers drop-in below is rewritten.
+rm -f /usr/local/sbin/android-lock /usr/local/sbin/android-unlock \
+      /usr/local/bin/android-lock /usr/local/bin/android-unlock
 
-# NOPASSWD sudoers for all three. Consolidated drop-in so /etc/sudoers.d/ stays
-# tidy. Each target is an explicit path — sudoers globbing is off by default.
+# NOPASSWD sudoers for both helpers. Consolidated drop-in so /etc/sudoers.d/
+# stays tidy. Each target is an explicit path — sudoers globbing is off by
+# default. The single `android` stanza covers all its subcommands.
 TMP_SUDO=$(mktemp)
 cat > "$TMP_SUDO" <<'EOF'
 user ALL=(root) NOPASSWD: /usr/local/sbin/reboot
-user ALL=(root) NOPASSWD: /usr/local/sbin/android-lock
-user ALL=(root) NOPASSWD: /usr/local/sbin/android-unlock
+user ALL=(root) NOPASSWD: /usr/local/sbin/android
 EOF
 visudo -cf "$TMP_SUDO" >/dev/null
 install -m 0440 -o root -g root "$TMP_SUDO" /etc/sudoers.d/50-moon-helpers
 rm -f "$TMP_SUDO"
 
-# PATH wrappers in /usr/local/bin. Lets `user` type bare `reboot`,
-# `android-lock`, `android-unlock` from any shell (interactive or not, login
-# or `ssh moon-user <cmd>` non-interactive) without aliases or PATH gymnastics
+# PATH wrappers in /usr/local/bin. Lets `user` type bare `reboot` or
+# `android <cmd>` from any shell (interactive or not, login or
+# `ssh moon-user <cmd>` non-interactive) without aliases or PATH gymnastics
 # — /usr/local/bin is in default PATH everywhere. Each wrapper is just `exec
 # sudo` to the real binary; sudo finds the NOPASSWD entry via secure_path.
-for cmd in reboot android-lock android-unlock; do
+for cmd in reboot android; do
     cat > "/usr/local/bin/$cmd" <<EOF
 #!/bin/sh
 # Thin wrapper installed by ssh_setup.sh — see /usr/local/sbin/$cmd for

@@ -13,7 +13,7 @@
 # See docs/INSTALLATION.md § "Autostart at boot".
 #
 #   1. Stage the file on /sdcard (FUSE — writable from chroot).
-#   2. chroot into PID 1's root (real Android FS — see android-lock.sh for
+#   2. chroot into PID 1's root (real Android FS — see android.sh for
 #      the rationale) and copy the staged file into Termux home.
 #   3. Remove the /sdcard stage.
 #

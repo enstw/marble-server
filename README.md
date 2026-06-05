@@ -39,7 +39,7 @@ Turning a Xiaomi Poco F5 5G (`marble`, Snapdragon 7+ Gen 2) into a headless ARM6
   - `host-hooks/` — source-of-truth for the boot hooks deployed to `/etc/host-hooks/*.hook` (run once per boot, in lexical order, inside the chroot): `10-sshd`, `20-tailscale`, `50-agents`. Enable/disable by `.disabled` rename; see `host-hooks/README.md` for the hook contract and `docs/INSTALLATION.md` § "Boot hooks" for the full playbook
   - `run-as.sh` — source-of-truth for `/usr/local/sbin/run-as`: drop privileges to a target user (`run-as <user> -- <cmd>`); generic boot-hook helper, deployed by `ssh_setup.sh` so any hook can rely on it
   - `tmux-service.sh` — source-of-truth for `/usr/local/bin/tmux-service`: run a command in a detached tmux session with crash-loop recovery and log tee
-  - `android-lock.sh`, `android-unlock.sh` — manual screen-off / wake over the chroot-escape path (counter to screen-off CPU throttling; see `docs/MAINTENANCE.md` §1)
+  - `android.sh` — `android lock` / `android unlock [--stayon]`: manual screen-off / wake over the chroot-escape path (counter to screen-off CPU throttling; see `docs/MAINTENANCE.md` §1)
   - `reboot.sh` — root helper deployed at `/usr/local/sbin/reboot`; schedules detached reboot then SIGHUPs the per-session sshd for a clean disconnect (called by `user` through the `/usr/local/bin/reboot` sudo wrapper)
   - `ksu-moon-ssh/` — KSU-Next module whose `service.sh` enters the chroot once at `late_start service` and runs the `/etc/host-hooks/*.hook` boot hooks (sshd + tailscaled, plus agents if enabled)
   - `archive/` — quarantined scripts (see `archive/README.md`)
