@@ -107,6 +107,20 @@ android unlock --stayon
 
 Source: `scripts/android.sh`. State transitions via `dumpsys power | grep mWakefulness=` — `Awake` ↔ `Dozing`.
 
+### In-chroot deploys without adb (`termux` helper)
+
+Termux's home (`/data/data/com.termux/files/home`) is **not** bind-mounted into the chroot (the bind set in `start_ubuntu.sh` is deliberate), so re-provisioning normally means delivering the bootstrap scripts from a workstation with `adb push` + `adb shell su -c …`. When you're already on the device (e.g. over tailnet SSH, no workstation), `scripts/termux.sh` does the same three things from inside the chroot by escaping to Android via `chroot /proc/1/root` (same pattern as `reboot`/`android`):
+
+```
+sudo ./scripts/termux.sh cp <src> [dest-name]   # stage a file into Termux $HOME (re-applies source mode over FUSE)
+sudo ./scripts/termux.sh rm <name>...           # remove file(s) from Termux $HOME
+sudo ./scripts/termux.sh exec <cmd> [args...]   # run a command in Android (init) context
+```
+
+A full no-adb re-provision is then `cp` the changed scripts, `rm` any stale staged copies, then `exec sh …/ssh_setup.sh` — see §2.7 for the worked android-helper example.
+
+Unlike `reboot` / `android`, this helper is **not installed** and is deliberately **not** wired into the `50-moon-helpers` NOPASSWD sudoers: `exec` runs an arbitrary command as root in Android context, so it must never be passwordless. It is root-only (needs `CAP_SYS_CHROOT`) and run in place as `sudo ./scripts/termux.sh …`. The installed helpers stay NOPASSWD precisely because each is a single fixed action behind its own explicit-path stanza — a generic exec cannot share that boundary.
+
 ## 2. Updates
 
 ### 2.1 Lineage OTA → **must re-KSU**
@@ -218,13 +232,25 @@ ssh moon tailscale status                 # node Connected
 
 Repo refactor merged the split `android-lock` / `android-unlock` helpers into a single `android` dispatcher with `lock` / `unlock [--stayon]` subcommands (`scripts/android.sh`, replacing the two deleted scripts). `ssh_setup.sh` now installs one `/usr/local/sbin/android` + one `/usr/local/bin/android` wrapper + one sudoers stanza, and deletes the old `/usr/local/{sbin,bin}/android-{lock,unlock}` binaries on re-run. Docs updated across `README.md`, `INSTALLATION.md`, `LESSONS.md`, and §1 here. Behavior is unchanged (same keyevents, same `--stayon`, same chroot-escape).
 
-**Repo-only so far — the live box still runs the old `android-lock` / `android-unlock`.** To deploy:
+**Repo-only so far — the live box still runs the old `android-lock` / `android-unlock`.** Two ways to deploy:
+
+**From a workstation (adb):**
 ```
 adb push scripts/android.sh scripts/ssh_setup.sh /data/data/com.termux/files/home/
 adb shell su -c 'rm -f /data/data/com.termux/files/home/android-lock.sh /data/data/com.termux/files/home/android-unlock.sh'   # drop stale staged copies
 adb shell su -c 'sh /data/data/com.termux/files/home/ssh_setup.sh'   # installs `android`, removes old split binaries + sudoers lines
 ```
-Verify: `ssh moon-user android lock` sleeps the display, `ssh moon-user android unlock` wakes it, and `ssh moon-user 'ls /usr/local/sbin/android*'` shows only `android` (no `-lock`/`-unlock`).
+
+**From inside the chroot (no adb)** — when you are already on the device over tailnet SSH, use the `termux` helper (`scripts/termux.sh`) to do the same cp / rm / run without a workstation:
+```
+sudo ./scripts/termux.sh cp scripts/android.sh        # stage new dispatcher into Termux home
+sudo ./scripts/termux.sh cp scripts/ssh_setup.sh      # stage updated installer
+sudo ./scripts/termux.sh rm android-lock.sh android-unlock.sh   # drop stale staged copies
+sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh
+```
+Note `ssh_setup.sh` bounces sshd as its last step (it runs `10-sshd.hook`), so run it detached or from a session that doesn't ride the port-2222 sshd if you don't want the connection to drop mid-run.
+
+Verify (either method): `ssh moon-user android lock` sleeps the display, `ssh moon-user android unlock` wakes it, and `ssh moon-user 'ls /usr/local/sbin/android*'` shows only `android` (no `-lock`/`-unlock`).
 
 ## 3. Troubleshooting
 
