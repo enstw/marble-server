@@ -22,6 +22,21 @@
 
 set -e
 
+# Disconnect the interactive client FIRST, while we still run as the
+# unprivileged user with $TMUX in the environment (sudo's env_reset scrubs it
+# past the self-elevation below). Every interactive login is wrapped in a
+# per-session tmux (ssh_setup.sh §3/§6): the pane shell is a child of the tmux
+# *server* — a detached daemon — so the per-session sshd is NOT in our process
+# ancestry and the parent-walk in Step 2 can never reach it. Detaching the
+# client makes `tmux attach` (hence the ssh session) return at once; the pane,
+# and this script, keep running detached so the reboot scheduled below still
+# fires. No-op for the non-interactive `ssh moon reboot` path ($TMUX unset) —
+# the sshd HUP in Step 2 covers that one instead.
+if [ -n "$TMUX" ] && command -v tmux >/dev/null 2>&1; then
+    sess=$(tmux display-message -p '#{session_name}' 2>/dev/null || true)
+    [ -n "$sess" ] && tmux detach-client -s "$sess" 2>/dev/null || true
+fi
+
 # Self-elevate — same pattern as android.sh. A bare `reboot` resolves here
 # (/usr/local/sbin is PATH-first), so without this it would run UNPRIVILEGED
 # and the chroot escape below would fail with ENOENT under /proc's hidepid.
@@ -40,15 +55,28 @@ nohup chroot /proc/1/root /system/bin/sh -c \
     '(sleep 2; /system/bin/reboot) </dev/null >/dev/null 2>&1 &' \
     </dev/null >/dev/null 2>&1 &
 
-# Step 2: walk up two hops ($$ → login shell → per-session sshd) and
-# SIGHUP the sshd. OpenSSH responds by closing the channel and FIN-ing
-# the TCP socket — the client returns within tens of ms instead of
-# waiting on FIN flush after EOF. Best-effort: if the chain breaks
-# (e.g. invoked from a console rather than ssh), the reboot is already
-# scheduled, so silent failure is fine.
-ssh_pid=$(awk '{print $4}' /proc/$PPID/stat 2>/dev/null || true)
-if [ -n "$ssh_pid" ] && [ "$ssh_pid" != "1" ]; then
-    kill -HUP "$ssh_pid" 2>/dev/null || true
-fi
+# Step 2: SIGHUP the per-session sshd so a non-interactive `ssh moon reboot`
+# returns at once instead of waiting on the TCP socket until the kernel panics.
+# OpenSSH responds to the HUP by closing the channel and FIN-ing the socket.
+# The ancestry here is  reboot.sh → sudo → login shell → sshd[-session]  — the
+# sudo hop is the self-elevation above. A previous fixed two-hop walk pointed
+# one short (at the login shell) once that hop was added, which is why reboot
+# stopped disconnecting. Climb parents and HUP the first sshd instead of
+# counting hops; OpenSSH ≥9.8 names the per-session process "sshd-session", so
+# match on the "sshd" prefix. Best-effort: interactive logins (tmux — handled
+# before the elevation above), console/adb, and Tailscale SSH (tailscaled, not
+# sshd) have no sshd ancestor, so the loop simply finds nothing and the
+# already-scheduled reboot proceeds.
+pid=$PPID
+while [ "${pid:-0}" -gt 1 ] 2>/dev/null; do
+    read -r comm < "/proc/$pid/comm" 2>/dev/null || break
+    case "$comm" in
+        sshd|sshd-*) kill -HUP "$pid" 2>/dev/null || true; break ;;
+    esac
+    read -r _ rest < "/proc/$pid/stat" 2>/dev/null || break
+    rest=${rest##*\) }   # drop "(comm) " → "state ppid …"
+    rest=${rest#* }      # drop state    → "ppid …"
+    pid=${rest%% *}      # ppid
+done
 
 exit 0

@@ -249,6 +249,19 @@ Post-deploy verification (from a normal `user` ssh session, no `sudo`): bare `an
 
 **Known limitation:** the self-elevation path works from interactive ssh logins but **not** from the Claude agent's own session — despite identical `uid`/groups/`ctx=u:r:ksu:s0`, the agent's elevated-root context makes `system_server` reject the `input`/`wm` binder call with `Failure calling service input: Failed transaction (2147483646)`. The chroot escape itself succeeds (no ENOENT); only the Android service call fails. So `android lock`/`unlock` cannot be driven from in-agent automation — run them from a real ssh session, or via `adb shell su -c 'sh …/android.sh <cmd>'`. Root cause not yet pinned down (suspect a PAM/pty-derived context difference on the elevated process).
 
+### 2.9 reboot stopped disconnecting ssh — SIGHUP regression from §2.8 (**fixed in repo, pending deploy**)
+
+The §2.8 self-elevation (`exec sudo`) inserted a `sudo` layer into `reboot.sh`'s process ancestry, which silently broke its SIGHUP-to-sshd step: it walked a **fixed two hops** up from `$PPID` (correct for `sshd → shell → reboot.sh`), so the extra `sudo` (`sshd → shell → sudo → reboot.sh`) made the HUP land on the login shell instead of sshd. Symptom: `ssh moon reboot` rebooted but the client hung on the socket until the kernel panicked, instead of returning at once. (The §2.8 commit message claimed "the parent walk is the same depth" — that was wrong; the `exec` is in-place but the extra `sudo` process is a real new ancestry hop.)
+
+Fix in `scripts/reboot.sh`: stop counting hops — **climb parents until the first `sshd`** (matches the `sshd` prefix, so OpenSSH ≥9.8's `sshd-session` is covered too). Plus a second path that the old hop-count never handled: an **interactive** login is wrapped in tmux, and the pane shell is a child of the detached tmux *server*, so **sshd is not in the ancestry at all** — for that case `reboot.sh` runs `tmux detach-client` up front (before `exec sudo`, while `$TMUX` still survives the env), which returns the ssh client while the detached pane runs on to fire the reboot. See `docs/LESSONS.md` §4.
+
+**Not yet deployed.** Redeploy via the in-chroot `termux` path (§1), same as §2.8 — stage the new script, then let `ssh_setup.sh` reinstall `/usr/local/sbin/reboot` from the staged copy (it `install`s inside the chroot and bounces sshd at the end):
+```
+sudo ./scripts/termux.sh cp scripts/reboot.sh
+sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh
+```
+Verify: `ssh moon reboot` returns within ~1 s (not after a multi-second socket hang), and the device reboots.
+
 ## 3. Troubleshooting
 
 ### `ssh moon` times out after a reboot
