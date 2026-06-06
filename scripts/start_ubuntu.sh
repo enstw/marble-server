@@ -75,11 +75,20 @@ is_mounted "$UBUNTU/tmp" || mount -t tmpfs tmpfs "$UBUNTU/tmp"
 # symlink to /run/systemd/resolve/stub-resolv.conf, whose target doesn't exist
 # because we never run systemd. Without rm, `cat >` would follow the dangling
 # symlink and fail.
+#
+# chmod 0644 explicitly: the rm+recreate makes resolv.conf a fresh file under
+# whatever umask we inherit. When this runs from a restrictive context (e.g.
+# ssh_setup.sh re-entry under root's umask 077) the new file lands 0600 and the
+# non-root resolver can't read it — DNS silently dies for `user` even though the
+# nameservers are correct. The umask-independent chmod keeps it world-readable.
+# (/etc/hosts and /etc/hostname are written without rm, so they keep their mode,
+# but chmod them too so a fresh chroot can't inherit the same trap.)
 rm -f "$UBUNTU/etc/resolv.conf"
 cat > "$UBUNTU/etc/resolv.conf" <<EOF
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 EOF
+chmod 0644 "$UBUNTU/etc/resolv.conf"
 
 # Minimal hosts file (overwrite Ubuntu's placeholder)
 cat > "$UBUNTU/etc/hosts" <<EOF
@@ -87,6 +96,7 @@ cat > "$UBUNTU/etc/hosts" <<EOF
 ::1         localhost moon
 EOF
 echo moon > "$UBUNTU/etc/hostname"
+chmod 0644 "$UBUNTU/etc/hosts" "$UBUNTU/etc/hostname"
 
 CHROOT_ENV="HOME=/root TERM=${TERM:-xterm-256color} LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 

@@ -322,6 +322,10 @@ Not an app-lifecycle problem — don't waste time on foreground-service / notifi
 
 Expected in KSU-Next v3.2.0 LKM mode. Don't verify root through those sysfs paths — they're not world-readable. The KSU Manager's status banner (`Working LKM (GKI2) Version …`) is the source of truth.
 
+### DNS dies after `ssh_setup.sh` (resolv.conf `0600`)
+
+Symptom: every hostname stops resolving (`Could not resolve host …`) although `tailscale status` shows the node up and `ip route` shows `wlan0` with an address — i.e. the network is fine, only DNS is dead. Check `ls -l /etc/resolv.conf`: if it is `-rw-------` (root-only), the non-root resolver can't read it. Cause: `start_ubuntu.sh` does `rm -f` then `cat >` on `/etc/resolv.conf` (to dodge a systemd-resolved dangling symlink), so it is recreated under the caller's umask — and `ssh_setup.sh` re-enters the chroot under root's `umask 077`, landing the fresh file at `0600`. Fix on the box: `sudo chmod 644 /etc/resolv.conf`. Permanent fix (2026-06-06): `start_ubuntu.sh` now `chmod 0644`s resolv.conf/hosts/hostname after writing — deploy the updated `start_ubuntu.sh` (`sudo ./scripts/termux.sh cp scripts/start_ubuntu.sh`) so it sticks across reboots.
+
 ## 4. Recovery
 
 ### Bootloop after KSU re-patch
