@@ -23,15 +23,27 @@
 #
 # Deployment: ssh_setup.sh installs this at /usr/local/sbin/android (root-only,
 # since chroot needs CAP_SYS_CHROOT), with a NOPASSWD sudoers entry in
-# /etc/sudoers.d/50-moon-helpers and a wrapper at /usr/local/bin/android so
-# callers can just type `android <cmd>` from PATH.
+# /etc/sudoers.d/50-moon-helpers. The script self-elevates (re-exec via sudo
+# when not root — see below), so a bare `android <cmd>` works from any shell
+# without a separate PATH wrapper.
 #
 # Usage:
-#   android lock                                # from user ssh (via PATH wrapper)
+#   android lock                                # from user ssh (self-elevates)
 #   android unlock [--stayon]
-#   sudo /usr/local/sbin/android lock           # from inside the chroot as user
+#   sudo android lock                           # explicit; also fine
 #   ssh moon-user android unlock                # from a workstation
 #   adb shell su -c 'sh /data/data/com.termux/files/home/android.sh lock'  # from Android directly
+
+# Self-elevate. A PATH-resident `android` resolves to this sbin copy first
+# (/usr/local/sbin precedes /usr/local/bin), so a separate /usr/local/bin
+# wrapper would be permanently shadowed — a bare `android` would run here
+# UNPRIVILEGED and the chroot escape below would fail with ENOENT under /proc's
+# hidepid. Re-exec through sudo (NOPASSWD) when not already root, so bare /
+# `sudo` / `ssh moon-user android …` all reach root here. From Android directly
+# (adb shell su) id is already 0, so this is a no-op.
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo /usr/local/sbin/android "$@"
+fi
 
 usage() {
     cat >&2 <<'EOF'

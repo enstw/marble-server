@@ -78,17 +78,17 @@ ssh moon reboot             # from Mac, over LAN SSH as user (NOPASSWD via wrapp
 ssh moon-user reboot        # from Mac, over tailnet SSH as user (NOPASSWD via wrapper)
 ```
 
-`/usr/local/sbin/reboot` inside the chroot is the SIGHUP-fast reboot script provisioned by `ssh_setup.sh` (source: `scripts/reboot.sh`). It schedules the Android-side reboot detached via `chroot /proc/1/root`, then SIGHUPs the per-session sshd so the ssh client returns within tens of ms instead of hanging on the TCP socket until the kernel panics. Shadows Ubuntu's systemd-wrapper `/sbin/reboot`; `user` reaches it through the `/usr/local/bin/reboot` sudo wrapper, while root paths and `sudo reboot` reach the `/usr/local/sbin` script directly. Lives under `/usr/local/sbin` which dpkg/apt never touch, so it survives package upgrades and chroot rebuilds.
+`/usr/local/sbin/reboot` inside the chroot is the SIGHUP-fast reboot script provisioned by `ssh_setup.sh` (source: `scripts/reboot.sh`). It schedules the Android-side reboot detached via `chroot /proc/1/root`, then SIGHUPs the per-session sshd so the ssh client returns within tens of ms instead of hanging on the TCP socket until the kernel panics. Shadows Ubuntu's systemd-wrapper `/sbin/reboot` (`/usr/local/sbin` precedes `/usr/sbin` and `/sbin` in PATH). Lives under `/usr/local/sbin` which dpkg/apt never touch, so it survives package upgrades and chroot rebuilds.
 
-`user` invokes it through the `/usr/local/bin/reboot` wrapper — a one-line `exec sudo /usr/local/sbin/reboot "$@"`. NOPASSWD comes from `/etc/sudoers.d/50-moon-helpers` (one drop-in, also covers `android`). So `ssh moon-user reboot` returns with no password prompt, and the wrapper works in non-interactive shells where an alias would not. Older revisions used an alias in `/home/user/.zsh/50-reboot.zsh` and a separate `/root/reboot.sh` install — `ssh_setup.sh` cleans both up on re-run.
+`user` invokes it bare — the script **self-elevates**: `if [ "$(id -u)" -ne 0 ]; then exec sudo /usr/local/sbin/reboot "$@"; fi`. NOPASSWD comes from `/etc/sudoers.d/50-moon-helpers` (one drop-in, also covers `android`). So `reboot` and `ssh moon-user reboot` return with no password prompt, in interactive and non-interactive shells alike. There is deliberately **no** `/usr/local/bin/reboot` wrapper: `/usr/local/sbin` is PATH-first, so a wrapper there would be permanently shadowed by this script — a bare `reboot` would run unprivileged and the chroot escape would fail with ENOENT under `/proc`'s `hidepid`. `ssh_setup.sh` removes any stale wrapper on re-run. Older revisions used an alias in `/home/user/.zsh/50-reboot.zsh` and a separate `/root/reboot.sh` install — `ssh_setup.sh` cleans both up on re-run.
 
-> **Shell config note:** `user`'s shell is `zsh`, set up via [enstw/myshell](https://github.com/enstw/myshell) — a personal zsh framework that generates `~/.zshrc` and `~/.zshenv` and auto-sources customs from `~/.zsh/*.zsh`. The reboot/lock/unlock commands no longer depend on this (PATH wrappers replaced the alias-in-drop-in approach), so re-running `ssh_setup.sh` after a fresh chroot rebuild doesn't require myshell to be installed first.
+> **Shell config note:** `user`'s shell is `zsh`, set up via [enstw/myshell](https://github.com/enstw/myshell) — a personal zsh framework that generates `~/.zshrc` and `~/.zshenv` and auto-sources customs from `~/.zsh/*.zsh`. The reboot/lock/unlock commands no longer depend on this (self-elevation replaced the alias-in-drop-in approach), so re-running `ssh_setup.sh` after a fresh chroot rebuild doesn't require myshell to be installed first.
 
 ### Manual screen lock / unlock
 
 Android drops the CPU into lower power states when the display is off, throttling Ubuntu workloads (see §3 "SSH throughput ~50%"). *Stay awake while charging* is the standing mitigation, but if the screen goes off anyway — cable glitch, accidental power tap, deliberate sleep — the `android` command flips the state back explicitly. `input keyevent`, `wm`, and `svc` are Android binaries (dynamically linked to `/system/bin/linker64` at absolute path), so they must run in Android context; the dispatcher self-escapes via `chroot /proc/1/root` (same pattern as `reboot.sh`).
 
-`ssh_setup.sh` installs the single dispatcher at `/usr/local/sbin/android` (root-only — `chroot` needs `CAP_SYS_CHROOT`), drops a PATH-resident wrapper at `/usr/local/bin/android` that `exec sudo`s to it, and provisions `/etc/sudoers.d/50-moon-helpers` so `user` invokes it with no password prompt. (This replaced the former split `android-lock` / `android-unlock` commands; re-running `ssh_setup.sh` deletes their old `/usr/local/{sbin,bin}` binaries.) From any shell — interactive or not, in the chroot or via `ssh moon-user` — just type the command:
+`ssh_setup.sh` installs the single dispatcher at `/usr/local/sbin/android` (root-only — `chroot` needs `CAP_SYS_CHROOT`) and provisions `/etc/sudoers.d/50-moon-helpers` so `user` invokes it with no password prompt. The script **self-elevates** (`if [ "$(id -u)" -ne 0 ]; then exec sudo /usr/local/sbin/android "$@"; fi`) — there is no `/usr/local/bin/android` wrapper, because `/usr/local/sbin` is PATH-first and would shadow it (a bare `android` would then run unprivileged and the chroot escape would fail with ENOENT under `hidepid`; this was the original `android lock` bug). (The dispatcher replaced the former split `android-lock` / `android-unlock` commands; re-running `ssh_setup.sh` deletes their old `/usr/local/{sbin,bin}` binaries and any stale `/usr/local/bin/android` wrapper.) From any shell — interactive or not, in the chroot or via `ssh moon-user` — just type the command:
 
 ```
 # Sleep the display (KEYCODE_SLEEP)
@@ -228,29 +228,26 @@ ssh moon ss -ltn | grep 2222              # sshd up
 ssh moon tailscale status                 # node Connected
 ```
 
-### 2.7 Android helper consolidation (repo-only 2026-06-05, **pending device re-provision**)
+### 2.7 Android helper consolidation (deployed 2026-06-06)
 
-Repo refactor merged the split `android-lock` / `android-unlock` helpers into a single `android` dispatcher with `lock` / `unlock [--stayon]` subcommands (`scripts/android.sh`, replacing the two deleted scripts). `ssh_setup.sh` now installs one `/usr/local/sbin/android` + one `/usr/local/bin/android` wrapper + one sudoers stanza, and deletes the old `/usr/local/{sbin,bin}/android-{lock,unlock}` binaries on re-run. Docs updated across `README.md`, `INSTALLATION.md`, `LESSONS.md`, and §1 here. Behavior is unchanged (same keyevents, same `--stayon`, same chroot-escape).
+Repo refactor merged the split `android-lock` / `android-unlock` helpers into a single `android` dispatcher with `lock` / `unlock [--stayon]` subcommands (`scripts/android.sh`, replacing the two deleted scripts), one sudoers stanza, and (originally) one `/usr/local/bin/android` wrapper. Deletes the old `/usr/local/{sbin,bin}/android-{lock,unlock}` binaries on re-run. Behavior unchanged (same keyevents, same `--stayon`, same chroot-escape). **Deployed 2026-06-06** via the in-chroot `termux` path (§1 "In-chroot deploys without adb"). The `/usr/local/bin/android` wrapper this shipped turned out to be broken and was removed in §2.8 below — see there.
 
-**Repo-only so far — the live box still runs the old `android-lock` / `android-unlock`.** Two ways to deploy:
+### 2.8 reboot/android self-elevation — wrapper-shadow fix (repo-only 2026-06-06, **pending device re-provision**)
 
-**From a workstation (adb):**
+The `/usr/local/bin/{reboot,android}` PATH wrappers (thin `exec sudo …`) were **dead code**: `/usr/local/sbin` precedes `/usr/local/bin` in PATH, so a bare `reboot` / `android` always resolved to the `/usr/local/sbin` script and never reached the wrapper. The sbin script then ran **unprivileged**, and its `chroot /proc/1/root` failed with `chroot: cannot change root directory to '/proc/1/root': no such directory` — because `/proc` is mounted `hidepid=invisible`, which returns ENOENT for `/proc/1` to any non-root caller. Only `sudo reboot` / `sudo android …` worked (they matched the NOPASSWD sbin path and ran as root). `type -a android` was the tell: two hits, `/usr/local/sbin/android` first.
+
+Fix: the sbin scripts now **self-elevate** (`[ "$(id -u)" -ne 0 ] && exec sudo /usr/local/sbin/<cmd> "$@"`), and `ssh_setup.sh` stops installing the bin wrappers and `rm`s them on re-run. `scripts/{android,reboot}.sh` + `ssh_setup.sh` changed; docs updated across `README.md`, `INSTALLATION.md`, and §1 here.
+
+**Repo-only so far — the live box still has the shadowing wrappers, so bare `android lock` / `reboot` still fail (use `sudo …` until deployed).** Deploy from inside the chroot (no adb needed — see §1):
 ```
-adb push scripts/android.sh scripts/ssh_setup.sh /data/data/com.termux/files/home/
-adb shell su -c 'rm -f /data/data/com.termux/files/home/android-lock.sh /data/data/com.termux/files/home/android-unlock.sh'   # drop stale staged copies
-adb shell su -c 'sh /data/data/com.termux/files/home/ssh_setup.sh'   # installs `android`, removes old split binaries + sudoers lines
-```
-
-**From inside the chroot (no adb)** — when you are already on the device over tailnet SSH, use the `termux` helper (`scripts/termux.sh`) to do the same cp / rm / run without a workstation:
-```
-sudo ./scripts/termux.sh cp scripts/android.sh        # stage new dispatcher into Termux home
-sudo ./scripts/termux.sh cp scripts/ssh_setup.sh      # stage updated installer
-sudo ./scripts/termux.sh rm android-lock.sh android-unlock.sh   # drop stale staged copies
+sudo ./scripts/termux.sh cp scripts/android.sh
+sudo ./scripts/termux.sh cp scripts/reboot.sh
+sudo ./scripts/termux.sh cp scripts/ssh_setup.sh
 sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh
 ```
-Note `ssh_setup.sh` bounces sshd as its last step (it runs `10-sshd.hook`), so run it detached or from a session that doesn't ride the port-2222 sshd if you don't want the connection to drop mid-run.
+`ssh_setup.sh` bounces sshd as its last step (runs `10-sshd.hook`), so run it detached or from a session that doesn't ride the port-2222 sshd if you don't want the connection to drop mid-run.
 
-Verify (either method): `ssh moon-user android lock` sleeps the display, `ssh moon-user android unlock` wakes it, and `ssh moon-user 'ls /usr/local/sbin/android*'` shows only `android` (no `-lock`/`-unlock`).
+Verify: `ssh moon-user android lock` sleeps the display and `ssh moon-user android unlock` wakes it **without** a leading `sudo`; `ssh moon-user 'command -v android'` shows only `/usr/local/sbin/android` (no `/usr/local/bin/android`).
 
 ## 3. Troubleshooting
 

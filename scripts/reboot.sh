@@ -6,20 +6,30 @@
 # session-closed. Replaces (and shadows) Ubuntu's systemd-wrapper /sbin/reboot
 # — in-chroot reboot(2) hangs ssh because the kernel panics before sshd can
 # close the TCP socket. PATH-first in interactive shells, in `sudo`'s
-# secure_path. The non-root `user` normally reaches it through the
-# /usr/local/bin/reboot wrapper installed by ssh_setup.sh.
+# secure_path. The script self-elevates (re-exec via sudo when not root — see
+# below), so the non-root `user` can call it bare.
 #
 # Deployment: ssh_setup.sh installs this at /usr/local/sbin/reboot with mode
-# 0755, NOPASSWD sudoers in /etc/sudoers.d/50-moon-helpers, and a wrapper at
-# /usr/local/bin/reboot so `user` can call it from any shell.
+# 0755 and a NOPASSWD sudoers entry in /etc/sudoers.d/50-moon-helpers. No PATH
+# wrapper — /usr/local/sbin precedes /usr/local/bin (and systemd's /sbin) in
+# PATH, so a bare `reboot` resolves to this script and self-elevates.
 #
 # Installed target runs as root. Invocations:
-#   reboot                          # in-chroot user shell (PATH wrapper → sudo)
+#   reboot                          # in-chroot user shell (self-elevates via sudo)
 #   sudo reboot                     # ditto, explicit
 #   ssh moon reboot                 # as user from a workstation (NOPASSWD)
 #   ssh moon-user reboot            # as user from a workstation (NOPASSWD)
 
 set -e
+
+# Self-elevate — same pattern as android.sh. A bare `reboot` resolves here
+# (/usr/local/sbin is PATH-first), so without this it would run UNPRIVILEGED
+# and the chroot escape below would fail with ENOENT under /proc's hidepid.
+# Re-exec through sudo (NOPASSWD) when not already root. No-op when already root
+# (sudo reboot, or Android-side adb shell su).
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo /usr/local/sbin/reboot "$@"
+fi
 
 # Step 1: schedule the Android-side reboot, fully detached. nohup + &
 # survives this script's exit and the subsequent sshd HUP. 2 s sleep

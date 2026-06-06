@@ -206,8 +206,8 @@ rm -f /tmp/reboot
 
 # Install the `android` dispatcher (subcommands: lock, unlock). Same pattern —
 # it self-escapes via chroot /proc/1/root (CAP_SYS_CHROOT needed), so the real
-# script lives in root-only territory and a PATH wrapper + NOPASSWD sudoers
-# give `user` access. Source: scripts/android.sh.
+# script lives in root-only territory and self-elevates (re-exec via sudo when
+# not root) against the NOPASSWD sudoers stanza below. Source: scripts/android.sh.
 install -m 0755 -o root -g root /tmp/android /usr/local/sbin/android
 rm -f /tmp/android
 # Drop the pre-consolidation split commands (android-lock / android-unlock)
@@ -229,20 +229,14 @@ visudo -cf "$TMP_SUDO" >/dev/null
 install -m 0440 -o root -g root "$TMP_SUDO" /etc/sudoers.d/50-moon-helpers
 rm -f "$TMP_SUDO"
 
-# PATH wrappers in /usr/local/bin. Lets `user` type bare `reboot` or
-# `android <cmd>` from any shell (interactive or not, login or
-# `ssh moon-user <cmd>` non-interactive) without aliases or PATH gymnastics
-# — /usr/local/bin is in default PATH everywhere. Each wrapper is just `exec
-# sudo` to the real binary; sudo finds the NOPASSWD entry via secure_path.
-for cmd in reboot android; do
-    cat > "/usr/local/bin/$cmd" <<EOF
-#!/bin/sh
-# Thin wrapper installed by ssh_setup.sh — see /usr/local/sbin/$cmd for
-# the real implementation. NOPASSWD via /etc/sudoers.d/50-moon-helpers.
-exec sudo /usr/local/sbin/$cmd "\$@"
-EOF
-    chmod 0755 "/usr/local/bin/$cmd"
-done
+# Remove the old /usr/local/bin/{reboot,android} PATH wrappers. They were dead
+# code: /usr/local/sbin precedes /usr/local/bin in PATH, so a bare `reboot` or
+# `android` always resolved to the /usr/local/sbin script and never reached the
+# wrapper — meaning it ran UNPRIVILEGED and the chroot escape failed with ENOENT
+# under /proc's hidepid (only `sudo reboot` / `sudo android`, which match the
+# NOPASSWD path, worked). The sbin scripts now self-elevate (re-exec via sudo
+# when not root), so the wrappers are both unnecessary and harmful; drop them.
+rm -f /usr/local/bin/reboot /usr/local/bin/android
 
 # Clean up the old /root/reboot.sh layout from earlier revisions: the script
 # itself, the per-script sudoers drop-in, the myshell alias file, and the
