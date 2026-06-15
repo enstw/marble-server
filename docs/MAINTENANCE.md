@@ -117,7 +117,7 @@ android play /sdcard/foo.mp3 # any file the Termux:API app can read (keep it on 
 android volume up            # KEYCODE_VOLUME_UP on the active stream; `down [n]` lowers
 ```
 
-`beep`/`play` route through Termux:API's MediaPlayer; `volume` sends `KEYCODE_VOLUME_UP`/`DOWN` keyevents (active stream — media while audio is playing, else ring). **One-time provisioning** (Termux:API APK + `termux-api` + `allow-external-apps=true` + chroot `ffmpeg`) and the full mechanism live in INSTALLATION.md Phase 5 §6 — they are install-time steps, not maintenance. **Caveat:** like `lock`/`unlock`, these are `system_server` binder calls, so they work from an interactive ssh session but fail from the long-running Claude/channel session with `Failure calling service activity: Failed transaction (2147483646)` (§2.8) — fire them from an ssh context (e.g. `ssh moon-user android beep`).
+`beep`/`play` route through Termux:API's MediaPlayer; `volume` sends `KEYCODE_VOLUME_UP`/`DOWN` keyevents (active stream — media while audio is playing, else ring). **One-time provisioning** (Termux:API APK + `termux-api` + `allow-external-apps=true` + chroot `ffmpeg`) and the full mechanism live in INSTALLATION.md Phase 5 §6 — they are install-time steps, not maintenance. Like `lock`/`unlock`, these are `system_server` binder calls that need a controlling tty; `android.sh` auto-allocates a pty when invoked without one (cron, boot hook, agent tool-exec, `ssh` without `-t`), so they work from any caller — see §2.8 for the root cause (this was the former "agent-context" limitation).
 
 ### In-chroot deploys without adb (`termux` helper)
 
@@ -259,7 +259,14 @@ sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh  
 ```
 Post-deploy verification (from a normal `user` ssh session, no `sudo`): bare `android unlock` / `lock` / `unlock` return rc=0 and drive the screen; `command -v android` shows only `/usr/local/sbin/android` (no `/usr/local/bin/android`).
 
-**Known limitation:** the self-elevation path works from interactive ssh logins but **not** from the Claude agent's own session — despite identical `uid`/groups/`ctx=u:r:ksu:s0`, the agent's elevated-root context makes `system_server` reject the `input`/`wm` binder call with `Failure calling service input: Failed transaction (2147483646)`. The chroot escape itself succeeds (no ENOENT); only the Android service call fails. So `android lock`/`unlock` cannot be driven from in-agent automation — run them from a real ssh session, or via `adb shell su -c 'sh …/android.sh <cmd>'`. **The same limitation applies to every `android` subcommand that makes a `system_server` binder call** — confirmed for `beep`/`play` (`am startservice → activity`, fails with `Failure calling service activity`) and `volume` (`input keyevent`). A practical agent-side workaround is to shell back through sshd (`ssh moon-user android <cmd>`), which re-enters the working interactive context. Root cause not yet pinned down (suspect a PAM/pty-derived context difference on the elevated process).
+**Former limitation — root-caused and fixed (missing controlling tty).** The self-elevation path worked from interactive ssh logins but **not** from non-interactive callers (the Claude agent's tool-exec, cron, `ssh` without `-t`): `system_server` rejected the `input`/`wm` binder call with `Failure calling service input: Failed transaction (2147483646)`. The chroot escape itself always succeeded (no ENOENT) — only the Android service call failed. It was **not** the caller's uid/SELinux context (those were identical to the working ssh case); the difference was that the failing process had **no controlling terminal**. Confirmed empirically: the same command fails with no tty and succeeds when wrapped in a pty — across `input`/`wm` (`lock`/`unlock`/`volume`) **and** `am` (`beep`/`play`):
+
+```
+android unlock                       # no tty -> Failure calling service input/window
+python3 -c 'import pty,sys; pty.spawn(sys.argv[1:])' /usr/local/sbin/android unlock   # pty -> rc 0
+```
+
+**Fix:** `scripts/android.sh` now self-allocates a pty whenever it runs without one (`[ ! -t 1 ]`) — python3 `pty.spawn` (argv-preserving), falling back to `script(1)` — so **every** subcommand (`lock`/`unlock`/`beep`/`play`/`volume`) works from non-interactive callers too (agents, cron, the boot hook). An interactive shell already has a tty, so it's a no-op there. No ssh-loopback workaround needed. Redeploy via the in-chroot `termux` path (§1) to activate.
 
 ### 2.9 reboot stopped disconnecting ssh — SIGHUP regression from §2.8 (**fixed in repo, pending deploy**)
 

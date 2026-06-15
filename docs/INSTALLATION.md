@@ -737,7 +737,7 @@ am startservice --user 0 -n com.termux/com.termux.app.RunCommandService \
   --ez com.termux.RUN_COMMAND_BACKGROUND true
 ```
 
-**Caveat (confirmed):** like `lock`/`unlock`, these are `system_server` binder calls (`am startservice`, `input keyevent`), so they hit the agent-context limitation in MAINTENANCE.md §2.8 — they work from an interactive ssh session, but driven from the long-running Claude/channel session they fail with `cmd: Failure calling service activity: Failed transaction (2147483646)`. The persistent agent can't beep directly; fire alerts from an ssh context, e.g. shell back through sshd (`ssh moon-user android beep`). TTS (`termux-tts-speak`) is wired in Termux:API but is silent on this build — no Android TTS engine is installed; add one (eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech to enable a future `say`.
+**Controlling tty:** like `lock`/`unlock`, these are `system_server` binder calls (`am startservice`, `input keyevent`) that fail with `Failure calling service …: Failed transaction (2147483646)` when the caller has **no controlling terminal**. `android.sh` auto-allocates a pty when invoked without one, so beep/play/volume work from non-interactive callers (cron, the boot hook, an AI agent's tool-exec, `ssh` without `-t`) as well as interactive shells — see MAINTENANCE.md §2.8 for the root cause and the fix. TTS (`termux-tts-speak`) is wired in Termux:API but is silent on this build — no Android TTS engine is installed; add one (eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech to enable a future `say`.
 
 Source: `scripts/android.sh`. Day-to-day usage reference: MAINTENANCE.md §1.
 

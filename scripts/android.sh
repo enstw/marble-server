@@ -37,12 +37,11 @@
 #     `termux-reload-settings` (or restart Termux)
 # `beep` synthesizes a gravitational-wave inspiral chirp once to /sdcard via the chroot's ffmpeg;
 # `play <file>` plays any file the Termux:API app can read (keep it on /sdcard).
-# See docs/MAINTENANCE.md §1 "Audible alerts". NOTE: like lock/unlock, the
-# `am startservice` binder call hits the agent-context limitation in
-# MAINTENANCE.md §2.8 — works from an interactive ssh session, but a beep
-# driven from the long-running Claude/channel session FAILS with
-# "Failure calling service activity: Failed transaction". Fire it from an ssh
-# context (e.g. `ssh moon-user android beep`), not from in-agent automation.
+# See docs/MAINTENANCE.md §1 "Audible alerts". The `am`/`input` binder calls
+# need a controlling tty; the dispatcher auto-allocates a pty when run without
+# one (see the pty re-exec above), so beep/play/volume — like lock/unlock —
+# now work from non-interactive callers too (agents, cron, the boot hook). This
+# resolves the former MAINTENANCE.md §2.8 "agent-context" limitation.
 #
 # Deployment: ssh_setup.sh installs this at /usr/local/sbin/android (root-only,
 # since chroot needs CAP_SYS_CHROOT), with a NOPASSWD sudoers entry in
@@ -66,6 +65,28 @@
 # (adb shell su) id is already 0, so this is a no-op.
 if [ "$(id -u)" -ne 0 ]; then
     exec sudo /usr/local/sbin/android "$@"
+fi
+
+# Ensure a controlling tty. system_server rejects the binder calls these
+# subcommands make (`am` for beep/play, `input`/`wm` for lock/unlock/volume)
+# from a process with **no controlling terminal** — "Failure calling service
+# <x>: Failed transaction (2147483646)". An interactive shell already has a tty
+# (this is a no-op there); a non-interactive caller — cron, the boot hook, an
+# AI agent's tool-exec, `ssh` without `-t` — does not, so re-exec on a pty.
+# This is the actual root cause behind the former MAINTENANCE.md §2.8
+# "agent-context" limitation (it was the missing tty, not the caller's
+# identity). python3's pty.spawn preserves argv directly; util-linux script(1)
+# is the fallback (force /bin/sh so the rebuilt single-quoted command parses
+# POSIXly). If neither exists we fall through — works from a real tty only.
+if [ -z "${ANDROID_PTY:-}" ] && [ ! -t 1 ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        exec env ANDROID_PTY=1 python3 -c \
+            'import os,pty,sys; raise SystemExit(os.waitstatus_to_exitcode(pty.spawn(sys.argv[1:])))' \
+            "$0" "$@"
+    elif command -v script >/dev/null 2>&1; then
+        _shquote() { for _a in "$@"; do printf "'%s' " "$(printf '%s' "$_a" | sed "s/'/'\\\\''/g")"; done; }
+        exec env ANDROID_PTY=1 SHELL=/bin/sh script -qec "$(_shquote "$0" "$@")" /dev/null
+    fi
 fi
 
 usage() {
