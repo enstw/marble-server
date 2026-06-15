@@ -109,6 +109,39 @@ android unlock --stayon
 
 Source: `scripts/android.sh`. State transitions via `dumpsys power | grep mWakefulness=` — `Awake` ↔ `Dozing`.
 
+### Audible alerts (`android beep` / `android play`)
+
+The same `android` dispatcher can make the phone play a sound — useful as a physical alert alongside the Telegram bridge. Getting there ruled out everything simpler first: the Ubuntu chroot has **no audio device** (`/dev/snd` absent, no PulseAudio), and this Lineage build ships **no tinyalsa** (`tinyplay`/`tinymix` absent), **no `stagefright`/`media` CLI**, and **no media-player app** that auto-plays a `file://` VIEW intent (it just opens the player's library). The sound card is `ukeemtpsndcard` and `audioserver`/vendor audio HAL are up, so the only clean path is **through Android's audio framework**.
+
+The chosen mechanism is **Termux:API's MediaPlayer**, dispatched via **Termux's `RunCommandService`**:
+
+- It must run as the **Termux uid** — `termux-media-player` invoked as root (via the chroot escape) **hangs** on the Termux:API socket round-trip, and this build has **no `su`** to drop uid. `RunCommandService` makes Termux execute the command as itself.
+- One-time device prereqs:
+  1. Install the **Termux:API APK** (same source as Termux — F-Droid app with F-Droid Termux, etc.; a source/signature mismatch makes `termux-*` calls hang) **and** `pkg install termux-api`.
+  2. Set `allow-external-apps = true` in `~/.termux/termux.properties`, then `termux-reload-settings` (or restart Termux). Without it, `RunCommandService` refuses with a "requires allow-external-apps" notification.
+
+```
+android beep                 # built-in gravitational-wave inspiral chirp (synthesized once to /sdcard via ffmpeg)
+android play /sdcard/foo.mp3 # any file the Termux:API app can read (keep it on /sdcard)
+ssh moon-user android beep   # from a workstation
+android volume up            # raise the active stream one step (KEYCODE_VOLUME_UP)
+android volume down 3        # lower three steps (KEYCODE_VOLUME_DOWN x3)
+```
+
+`android volume up|down [n]` sends `n` `KEYCODE_VOLUME_UP`/`DOWN` keyevents (via the same `input` path as `lock`/`unlock`, so the §2.8 agent-context caveat applies). Keyevents adjust the **active** stream — the media stream while audio is playing (e.g. right after `android beep`/`play`), otherwise the ring stream. Deterministic per-stream control (`cmd media_session volume --stream 3 --set/--get`) returned `Failed transaction` on this build, so it is intentionally not used.
+
+Under the hood `android beep`/`play` runs (as root, via `chroot /proc/1/root`):
+
+```
+am startservice --user 0 -n com.termux/com.termux.app.RunCommandService \
+  -a com.termux.RUN_COMMAND \
+  --es com.termux.RUN_COMMAND_PATH /data/data/com.termux/files/usr/bin/termux-media-player \
+  --esa com.termux.RUN_COMMAND_ARGUMENTS play,<file> \
+  --ez com.termux.RUN_COMMAND_BACKGROUND true
+```
+
+Source: `scripts/android.sh`. **Caveat:** like `lock`/`unlock`, this is an Android binder call (`am startservice` → `system_server`), so it may hit the agent-context limitation in §2.8 — **verified working from an interactive ssh session; agent-driven (`sudo android beep` from the Claude session) is still to be confirmed.** TTS (`termux-tts-speak`) is also wired in Termux:API but produced **no sound** — this build has no Android TTS engine installed; add one (e.g. eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech before a `say` subcommand would be worth adding.
+
 ### In-chroot deploys without adb (`termux` helper)
 
 Termux's home (`/data/data/com.termux/files/home`) is **not** bind-mounted into the chroot (the bind set in `start_ubuntu.sh` is deliberate), so re-provisioning normally means delivering the bootstrap scripts from a workstation with `adb push` + `adb shell su -c …`. When you're already on the device (e.g. over tailnet SSH, no workstation), `scripts/termux.sh` does the same three things from inside the chroot by escaping to Android via `chroot /proc/1/root` (same pattern as `reboot`/`android`):
