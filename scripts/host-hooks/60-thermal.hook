@@ -1,0 +1,67 @@
+#!/bin/sh
+# 60-thermal.hook — apply the static CPU max-frequency cap and start the passive
+# thermal logger at boot.
+#
+# Dispatched by ksu-moon-ssh/service.sh inside the chroot; runs as ROOT. Numbered
+# after 50 so a thermal flap can never mask an sshd/tailscale regression in the
+# exit code service.sh reports.
+#
+# Why a STATIC cap (not a reactive throttler): moon already has a thermal monitor
+# (mi_thermald + the kernel step_wise governor). In the 2026-06-15 reboots it failed
+# only because the heat INPUT — full turbo on all cores + charging in a sealed box,
+# driven by a crash-loop — outran it. Writing scaling_max_freq once lowers that input
+# ceiling so the existing stack can hold the line. A static cap is effective-max =
+# min(cap, vendor thermal limit): the vendor only ever throttles FURTHER when hot, so
+# there is nothing to oscillation-fight. The monitor started here is passive (logs
+# only) — it controls nothing. See docs/LESSONS.md and config/moon-thermal.conf.
+#
+# Enable/disable: rename to 60-thermal.hook.disabled (and back).
+# /sys is rbind-mounted into the chroot by start_ubuntu.sh, so the cpufreq nodes
+# below are the real Android sysfs and are root-writable.
+set -e
+
+CONF=/etc/moon-thermal.conf
+[ -r "$CONF" ] && . "$CONF"
+
+CPUFREQ=/sys/devices/system/cpu/cpufreq
+MON=/usr/local/sbin/moon-thermal-monitor
+
+# Apply one cap. $1 = policy dir, $2 = target kHz (empty -> leave at hardware max).
+# Every path returns 0 so a skip/failure never aborts the hook under `set -e`; the
+# cap is best-effort and must not block boot. The read-back is logged so the boot
+# record shows whether the cap actually took.
+apply_cap() {
+    pol=$1; khz=$2
+    node=$CPUFREQ/$pol/scaling_max_freq
+    if [ -z "$khz" ]; then echo "cap $pol: unset -> hardware max (no change)"; return 0; fi
+    if [ ! -e "$node" ]; then echo "WARN cap $pol: $node absent — skipped" >&2; return 0; fi
+    if echo "$khz" > "$node" 2>/dev/null; then
+        got=$(cat "$node" 2>/dev/null || echo "?")
+        hw=$(cat "$CPUFREQ/$pol/cpuinfo_max_freq" 2>/dev/null || echo "?")
+        if [ "$got" = "$khz" ]; then
+            echo "cap $pol: scaling_max_freq=$got (hw max $hw) OK"
+        else
+            echo "WARN cap $pol: wanted $khz but node reads $got (hw max $hw)" >&2
+        fi
+    else
+        echo "WARN cap $pol: write to $node denied/failed — left at hardware max" >&2
+    fi
+    return 0
+}
+
+echo --- apply CPU max-freq cap ---
+apply_cap policy4 "$CAP_BIG_KHZ"
+apply_cap policy7 "$CAP_PRIME_KHZ"
+
+echo --- start passive thermal monitor ---
+# Idempotent: kill any stale monitor, then relaunch detached (nohup &) so it survives
+# the hook loop ending — same pattern 20-tailscale.hook uses for tailscaled.
+pkill -f "$MON" 2>/dev/null || true
+sleep 1
+if [ -x "$MON" ]; then
+    nohup "$MON" >/dev/null 2>&1 &
+    sleep 1
+    ps -eo pid,user,cmd | grep -F "$MON" | grep -v grep || echo "(monitor not visible in ps — check $MON)"
+else
+    echo "WARN: $MON missing or not executable — run thermal_setup.sh" >&2
+fi
