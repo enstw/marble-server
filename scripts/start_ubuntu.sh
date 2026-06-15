@@ -66,7 +66,16 @@ done
 
 bind_once /proc   "$UBUNTU/proc"   --rbind
 bind_once /sys    "$UBUNTU/sys"    --rbind
-bind_once /sdcard "$UBUNTU/sdcard"
+# /sdcard is non-essential (sshd/tailscale don't touch it) and, at KSU
+# late_start, Android's emulated storage often isn't mounted yet — /sdcard ->
+# /storage/self/primary doesn't resolve, so the bind fails "No such file or
+# directory". Under `set -e` that aborts the ENTIRE chroot entry before the boot
+# hooks run, taking down sshd/tailscale with it (observed 2026-06-15: rc=255,
+# no sshd, port 2222 refused until the service was re-run by hand). Make it
+# non-fatal: a missing /sdcard at boot must never block sshd. If you need
+# /sdcard in an already-running chroot, bind it later once storage is up:
+#   su -c 'mount --bind /sdcard /data/data/com.termux/files/home/ubuntu/sdcard'
+bind_once /sdcard "$UBUNTU/sdcard" || echo "WARN: /sdcard not ready at boot; skipped (sshd/tailscale unaffected)"
 
 is_mounted "$UBUNTU/tmp" || mount -t tmpfs tmpfs "$UBUNTU/tmp"
 
