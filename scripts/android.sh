@@ -38,9 +38,11 @@
 # `beep` synthesizes a gravitational-wave inspiral chirp once to /sdcard via the chroot's ffmpeg;
 # `play <file>` plays any file the Termux:API app can read (keep it on /sdcard).
 # See docs/MAINTENANCE.md §1 "Audible alerts". NOTE: like lock/unlock, the
-# `am startservice` binder call may hit the agent-context limitation documented
-# in MAINTENANCE.md §2.8 (works from an interactive ssh session; agent-driven
-# use is to be verified).
+# `am startservice` binder call hits the agent-context limitation in
+# MAINTENANCE.md §2.8 — works from an interactive ssh session, but a beep
+# driven from the long-running Claude/channel session FAILS with
+# "Failure calling service activity: Failed transaction". Fire it from an ssh
+# context (e.g. `ssh moon-user android beep`), not from in-agent automation.
 #
 # Deployment: ssh_setup.sh installs this at /usr/local/sbin/android (root-only,
 # since chroot needs CAP_SYS_CHROOT), with a NOPASSWD sudoers entry in
