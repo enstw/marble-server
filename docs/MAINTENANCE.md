@@ -266,7 +266,7 @@ android unlock                       # no tty -> Failure calling service input/w
 python3 -c 'import pty,sys; pty.spawn(sys.argv[1:])' /usr/local/sbin/android unlock   # pty -> rc 0
 ```
 
-**Fix:** `scripts/android.sh` now self-allocates a pty whenever it runs without one (`[ ! -t 1 ]`) — python3 `pty.spawn` (argv-preserving), falling back to `script(1)` — so **every** subcommand (`lock`/`unlock`/`beep`/`play`/`volume`) works from non-interactive callers too (agents, cron, the boot hook). An interactive shell already has a tty, so it's a no-op there. No ssh-loopback workaround needed. Redeploy via the in-chroot `termux` path (§1) to activate.
+**Fix:** `scripts/android.sh` now self-allocates a pty whenever it runs without one (`[ ! -t 1 ]`) — python3 `pty.spawn` (argv-preserving), falling back to `script(1)` — so **every** subcommand (`lock`/`unlock`/`beep`/`play`/`volume`) works from non-interactive callers too (agents, cron, the boot hook). An interactive shell already has a tty, so it's a no-op there. No ssh-loopback workaround needed. **Deployed & verified 2026-06-16** — a bare `android beep` from a no-tty context (an AI agent's tool-exec) now auto-allocates a pty and returns `Starting service: …` instead of `Failed transaction`.
 
 ### 2.9 reboot stopped disconnecting ssh — SIGHUP regression from §2.8 (**fixed in repo, pending deploy**)
 
