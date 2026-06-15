@@ -43,7 +43,7 @@ All aliases land **inside the chroot**. OpenSSH is non-root by design (`PermitRo
 | :--- | :--- | :--- |
 | Autostart boot log (both sshd + tailscaled) | `/var/log/moon-ssh-boot.log` (preamble fallback `/data/local/tmp/moon-ssh-boot.log` — Android side, only relevant if stage-2 handoff failed) | inside chroot — plain `cat` |
 | Tailscaled | `/var/log/tailscaled.log` | inside chroot |
-| Thermal cap + monitor | `/var/log/moon-thermal.log` (30s samples: max cpu / charger / battery temps + `policy4/7` cur+max freqs; the max-freq columns double as the cap-stickiness check) | inside chroot |
+| CPU cap + resource monitor | `/var/log/moon-resource.log` (30s samples: max cpu / charger / battery temps + `policy4/7` cur+max freqs + memory/swap/slab/thread/pid accumulators; the max-freq columns double as the cap-stickiness check) | inside chroot |
 | sshd | syslog — lost unless `rsyslog` installed | — |
 
 > **Why sshd has no log file:** the chroot has no syslog daemon. sshd writes to `syslog(3)` → `/dev/log`, which is not wired up. Install `rsyslog` in the chroot if you want persistent SSH logs.
@@ -58,9 +58,9 @@ All aliases land **inside the chroot**. OpenSSH is non-root by design (`PermitRo
 | `user` password hash | `/etc/shadow` (inside chroot) | reboots; **lost on chroot rebuild** — re-run `passwd user` once to re-enable sudo |
 | SSH authorized_keys (user) | `/home/user/.ssh/authorized_keys` (inside chroot) | reboots; re-installed from the gitignored live `config/authorized_keys` each time `ssh_setup.sh` runs. Boot hooks are start-only (`10-sshd.hook` does not re-provision), so a manual in-chroot edit now **survives reboot** — but it is overwritten the next time you run `ssh_setup.sh` (rebuild or key rotation). Rotate keys by editing `config/authorized_keys` and re-running `ssh_setup.sh`, not by editing in the chroot. |
 | KSU module | `/data/adb/modules/moon-ssh/` | reboots, Lineage OTAs, factory reset wipes |
-| On-device script copies | `/data/data/com.termux/files/home/{start_ubuntu,ssh_setup,tailscale_setup,agents_setup,thermal_setup,reboot,android,tmux-service,run-as,moon-thermal-monitor}.sh` + `authorized_keys` + `moon-thermal.conf` + `{10-sshd,20-tailscale,50-agents,60-thermal}.hook` | reboots |
+| On-device script copies | `/data/data/com.termux/files/home/{start_ubuntu,ssh_setup,tailscale_setup,agents_setup,resource_setup,reboot,android,tmux-service,run-as,moon-resource-monitor}.sh` + `authorized_keys` + `moon-resource.conf` + `{10-sshd,20-tailscale,50-agents,60-resource}.hook` | reboots |
 | Boot hooks (deployed) | `/etc/host-hooks/*.hook` (inside chroot) | reboots; **lost on chroot rebuild** — redeployed by the matching `*_setup.sh` (run in the rebuild sequence). `.disabled` enable/disable state is preserved across re-runs |
-| Thermal cap config + monitor | `/etc/moon-thermal.conf` (cap freqs + monitor settings) + `/usr/local/sbin/moon-thermal-monitor` (inside chroot) | reboots; **lost on chroot rebuild** — redeployed by `thermal_setup.sh`. The config is install-only-if-absent, so on-device cap tuning survives a re-run |
+| CPU cap config + resource monitor | `/etc/moon-resource.conf` (cap freqs + monitor settings) + `/usr/local/sbin/moon-resource-monitor` (inside chroot) | reboots; **lost on chroot rebuild** — redeployed by `resource_setup.sh`. The config is install-only-if-absent, so on-device cap tuning survives a re-run |
 
 ### Manual restart
 
@@ -331,22 +331,22 @@ Not an app-lifecycle problem — don't waste time on foreground-service / notifi
 
 ### CPU max-freq cap is intentional (`scaling_max_freq` < hardware max)
 
-Since 2026-06-15, `60-thermal.hook` deliberately caps the Big/Prime clusters below their hardware
+Since 2026-06-15, `60-resource.hook` deliberately caps the Big/Prime clusters below their hardware
 max (`scaling_max_freq` = **2227200 / 2592000** kHz vs hw 2496000 / 2918400) as a sustained-load
 thermal backstop after the crash-loop reboots — full rationale in `docs/LESSONS.md` §4 and
 `§3 "SSH throughput"` mitigation 3 above. **This is not a vendor screen-off throttle to remove.**
 If the throughput audit shows `scaling_max_freq < cpuinfo_max_freq`, that is the cap working.
 
-- **Retune:** edit `/etc/moon-thermal.conf` (`CAP_BIG_KHZ` / `CAP_PRIME_KHZ`; value must be a real
+- **Retune:** edit `/etc/moon-resource.conf` (`CAP_BIG_KHZ` / `CAP_PRIME_KHZ`; value must be a real
   `scaling_available_frequencies` rung, empty = leave at hardware max), then reboot or re-run
-  `adb shell su -c 'sh /data/data/com.termux/files/home/thermal_setup.sh'`. Don't hand-write the
+  `adb shell su -c 'sh /data/data/com.termux/files/home/resource_setup.sh'`. Don't hand-write the
   sysfs node — the hook re-applies the configured value at every boot.
 - **Governor interplay:** pinning `performance` (mitigation 1) is compatible — it runs the CPU *at*
   `scaling_max_freq`, which is the cap.
-- **Evidence:** `/var/log/moon-thermal.log` carries the temp/freq history; the `p4max`/`p7max`
+- **Evidence:** `/var/log/moon-resource.log` carries the temp/freq history; the `p4max`/`p7max`
   columns reveal if the vendor stack ever rewrites the cap (it didn't, in the 2026-06-15 soak).
-- **Disable entirely:** `sudo mv /etc/host-hooks/60-thermal.hook{,.disabled}` and reboot (or set both
-  caps empty in the config). `pkill -f moon-thermal-monitor` stops the logger.
+- **Disable entirely:** `sudo mv /etc/host-hooks/60-resource.hook{,.disabled}` and reboot (or set both
+  caps empty in the config). `pkill -f moon-resource-monitor` stops the logger.
 
 ### `adb shell su` returns "not found"
 

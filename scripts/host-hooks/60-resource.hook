@@ -1,6 +1,6 @@
 #!/bin/sh
-# 60-thermal.hook — apply the static CPU max-frequency cap and start the passive
-# thermal logger at boot.
+# 60-resource.hook — apply the static CPU max-frequency cap and start the passive
+# resource logger at boot.
 #
 # Dispatched by ksu-moon-ssh/service.sh inside the chroot; runs as ROOT. Numbered
 # after 50 so a thermal flap can never mask an sshd/tailscale regression in the
@@ -13,18 +13,18 @@
 # ceiling so the existing stack can hold the line. A static cap is effective-max =
 # min(cap, vendor thermal limit): the vendor only ever throttles FURTHER when hot, so
 # there is nothing to oscillation-fight. The monitor started here is passive (logs
-# only) — it controls nothing. See docs/LESSONS.md and config/moon-thermal.conf.
+# only) — it controls nothing. See docs/LESSONS.md and config/moon-resource.conf.
 #
-# Enable/disable: rename to 60-thermal.hook.disabled (and back).
+# Enable/disable: rename to 60-resource.hook.disabled (and back).
 # /sys is rbind-mounted into the chroot by start_ubuntu.sh, so the cpufreq nodes
 # below are the real Android sysfs and are root-writable.
 set -e
 
-CONF=/etc/moon-thermal.conf
+CONF=/etc/moon-resource.conf
 [ -r "$CONF" ] && . "$CONF"
 
 CPUFREQ=/sys/devices/system/cpu/cpufreq
-MON=/usr/local/sbin/moon-thermal-monitor
+MON=/usr/local/sbin/moon-resource-monitor
 
 # Apply one cap. $1 = policy dir, $2 = target kHz (empty -> leave at hardware max).
 # Every path returns 0 so a skip/failure never aborts the hook under `set -e`; the
@@ -53,7 +53,7 @@ echo --- apply CPU max-freq cap ---
 apply_cap policy4 "$CAP_BIG_KHZ"
 apply_cap policy7 "$CAP_PRIME_KHZ"
 
-echo --- start passive thermal monitor ---
+echo --- start passive resource monitor ---
 # Idempotent: kill any stale monitor, then relaunch detached (nohup &) so it survives
 # the hook loop ending — same pattern 20-tailscale.hook uses for tailscaled.
 pkill -f "$MON" 2>/dev/null || true
@@ -63,5 +63,5 @@ if [ -x "$MON" ]; then
     sleep 1
     ps -eo pid,user,cmd | grep -F "$MON" | grep -v grep || echo "(monitor not visible in ps — check $MON)"
 else
-    echo "WARN: $MON missing or not executable — run thermal_setup.sh" >&2
+    echo "WARN: $MON missing or not executable — run resource_setup.sh" >&2
 fi

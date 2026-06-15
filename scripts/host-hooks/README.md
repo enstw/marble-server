@@ -19,7 +19,7 @@ This README is just the contract for writing/editing a hook.
 | `10-sshd.hook` | start OpenSSH (port 2222) | enabled |
 | `20-tailscale.hook` | start tailscaled (userspace networking) + `tailscale up` | enabled |
 | `50-agents.hook` | **template** — launches the AI agents you uncomment/add (freeloader, hermes, openclaw examples included) | **disabled** (deployed as `.disabled`) |
-| `60-thermal.hook` | apply the static CPU max-freq cap (`/etc/moon-thermal.conf`) + start the passive thermal logger (`moon-thermal-monitor` → `/var/log/moon-thermal.log`) | enabled |
+| `60-resource.hook` | apply the static CPU max-freq cap (`/etc/moon-resource.conf`) + start the passive resource logger (`moon-resource-monitor` → `/var/log/moon-resource.log`) | enabled |
 
 Numeric prefix = run order. Keep gaps (10/20/50) so new hooks can slot between.
 
@@ -61,8 +61,8 @@ sudo mv /etc/host-hooks/50-agents.hook /etc/host-hooks/50-agents.hook.disabled  
 
 Normally automatic: each `*_setup.sh` deploys its own hook during provisioning
 (`ssh_setup.sh` → `10-sshd`, `tailscale_setup.sh` → `20-tailscale`,
-`agents_setup.sh` → `50-agents.hook.disabled`, `thermal_setup.sh` → `60-thermal`
-+ its `moon-thermal-monitor` binary and `/etc/moon-thermal.conf`), reading it from Termux home — so
+`agents_setup.sh` → `50-agents.hook.disabled`, `resource_setup.sh` → `60-resource`
++ its `moon-resource-monitor` binary and `/etc/moon-resource.conf`), reading it from Termux home — so
 push `*.hook` there alongside the setup scripts, and a chroot rebuild redeposits
 them. To iterate on one hook without full provisioning:
 
