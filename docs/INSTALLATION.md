@@ -255,7 +255,7 @@ adb shell su -c 'sh /data/data/com.termux/files/home/ssh_setup.sh'
 1. Stages the gitignored live `config/authorized_keys` file into `/home/user/.ssh/authorized_keys`. Start from `config/authorized_keys.example`, add local public keys, and re-push after key rotation — never bake keys into the script.
 1. Writes `/etc/ssh/sshd_config.d/10-moon.conf`: `Port 2222`, `ListenAddress 0.0.0.0`, `PermitRootLogin no`, `PasswordAuthentication no`, `PubkeyAuthentication yes`. OpenSSH is pubkey-only and non-root; root administration goes through `sudo`, `adb shell su`, or Tailscale identity SSH where configured.
 1. Installs `/usr/local/sbin/reboot` from the repo-tracked `scripts/reboot.sh`. Shadows Ubuntu's systemd-wrapper `/sbin/reboot` — in-chroot `reboot(2)` works (we have `CAP_SYS_BOOT`) but bypasses Android init's graceful-shutdown sequence, and SSH hangs because the kernel panics before sshd can close the TCP socket. The script hops out to Android's init via `/proc/1/root`, schedules toybox `reboot` detached, then SIGHUPs the per-session sshd so the SSH client returns within tens of ms. Lives under `/usr/local/sbin` which dpkg/apt never touch, so it survives package upgrades. Earlier revisions kept two reboot scripts (a slow stdio-EOF shim here plus a separate fast SIGHUP variant at `/root/reboot.sh`); the current script collapses them — `ssh_setup.sh` removes the stale `/root/reboot.sh` and `/etc/sudoers.d/50-reboot` on re-run.
-1. Installs `/usr/local/sbin/android` from the repo-tracked `scripts/android.sh` — a single dispatcher with `lock` / `unlock [--stayon]` subcommands (consolidated from the former split `android-lock` / `android-unlock` commands; re-runs delete the old `/usr/local/{sbin,bin}/android-{lock,unlock}` binaries). Same chroot-escape pattern as `reboot` — it reaches `/system/bin/input` / `wm` / `svc` via `chroot /proc/1/root`, so it needs `CAP_SYS_CHROOT` and lives in root-only territory.
+1. Installs `/usr/local/sbin/android` from the repo-tracked `scripts/android.sh` — a single dispatcher with `lock` / `unlock [--stayon]` subcommands, plus `beep` / `play <file>` / `volume up|down` (audible alerts — these need a one-time Termux:API setup, see Phase 5 §6) (the lock/unlock pair was consolidated from the former split `android-lock` / `android-unlock` commands; re-runs delete the old `/usr/local/{sbin,bin}/android-{lock,unlock}` binaries). Same chroot-escape pattern as `reboot` — it reaches `/system/bin/input` / `wm` / `svc` / `am` via `chroot /proc/1/root`, so it needs `CAP_SYS_CHROOT` and lives in root-only territory.
 1. Writes `/etc/sudoers.d/50-moon-helpers` granting `user` NOPASSWD on `/usr/local/sbin/{reboot,android}` (two explicit-path stanzas, no globbing — the single `android` stanza covers all its subcommands). Both scripts **self-elevate** (`[ "$(id -u)" -ne 0 ] && exec sudo /usr/local/sbin/<cmd> "$@"`), so `ssh moon-user reboot`, `ssh moon-user android lock`, bare `reboot` interactively, and scripted invocations all work without aliases or PATH gymnastics. There is deliberately **no** `/usr/local/bin/{reboot,android}` wrapper — `/usr/local/sbin` is PATH-first, so a same-named wrapper there is shadowed by the real script; a bare command would resolve to it and (pre-elevation) run unprivileged, failing the chroot escape with ENOENT under `/proc`'s `hidepid`. `ssh_setup.sh` removes any stale `/usr/local/bin/{reboot,android}` wrappers on re-run.
 1. Kills any prior `/usr/sbin/sshd` and relaunches it. sshd daemonizes; the `nohup` is implicit via the heredoc exec model.
 
@@ -701,6 +701,45 @@ With the groundwork in place, adding an agent is:
 1. `sudo mv /etc/host-hooks/50-agents.hook.disabled /etc/host-hooks/50-agents.hook` to enable, if not already.
 
 Per-agent playbooks (OpenClaw, Hermes) live in their own phase docs — this one stops at groundwork.
+
+## 6. (Optional) Audible alerts via Termux:API
+
+The `android` dispatcher (installed in Phase 3) can make the phone play a sound — a physical alert alongside the Telegram bridge. Getting there ruled out the simpler paths: the Ubuntu chroot has **no audio device** (`/dev/snd` absent, no PulseAudio), and this Lineage build ships **no tinyalsa** (`tinyplay`/`tinymix`), **no `stagefright`/`media` CLI**, and **no media-player app** that auto-plays a `file://` VIEW intent. `audioserver`/the vendor audio HAL are up (card `ukeemtpsndcard`), so the only clean path is **through Android's audio framework** — reached via **Termux:API's MediaPlayer**, dispatched through **Termux's `RunCommandService`** (it must run as the Termux uid: a root caller hangs the API socket, and this build has no `su` to drop uid).
+
+One-time provisioning:
+
+1. **Termux:API APK** — install from F-Droid (the **same source** as Termux, Phase 2 §1; a source/signature mismatch makes every `termux-*` call hang). This companion app is what actually plays audio / vibrates.
+1. **`termux-api` package** — in Termux: `pkg install termux-api`.
+1. **`allow-external-apps`** — so `RunCommandService` accepts the dispatch. In Termux:
+   ```
+   mkdir -p ~/.termux
+   printf '\nallow-external-apps = true\n' >> ~/.termux/termux.properties   # or uncomment an existing line
+   termux-reload-settings                                                   # or restart Termux
+   ```
+   Without it, `RunCommandService` refuses with a "requires allow-external-apps" notification.
+1. **`ffmpeg`** (chroot, for `beep` only) — `sudo apt install -y ffmpeg`. `beep` synthesizes its tone once to `/sdcard/.moon-beep.wav`; `play <file>` needs no ffmpeg.
+
+Verify (from an **interactive ssh session** — see the caveat):
+
+```
+android beep                  # gravitational-wave inspiral chirp (synthesized once via ffmpeg)
+android play /sdcard/foo.mp3  # any file the Termux:API app can read (keep it on /sdcard)
+android volume up             # KEYCODE_VOLUME_UP on the active stream; `down [n]` lowers
+```
+
+Under the hood `beep`/`play` run, as root via `chroot /proc/1/root`:
+
+```
+am startservice --user 0 -n com.termux/com.termux.app.RunCommandService \
+  -a com.termux.RUN_COMMAND \
+  --es com.termux.RUN_COMMAND_PATH /data/data/com.termux/files/usr/bin/termux-media-player \
+  --esa com.termux.RUN_COMMAND_ARGUMENTS play,<file> \
+  --ez com.termux.RUN_COMMAND_BACKGROUND true
+```
+
+**Caveat (confirmed):** like `lock`/`unlock`, these are `system_server` binder calls (`am startservice`, `input keyevent`), so they hit the agent-context limitation in MAINTENANCE.md §2.8 — they work from an interactive ssh session, but driven from the long-running Claude/channel session they fail with `cmd: Failure calling service activity: Failed transaction (2147483646)`. The persistent agent can't beep directly; fire alerts from an ssh context, e.g. shell back through sshd (`ssh moon-user android beep`). TTS (`termux-tts-speak`) is wired in Termux:API but is silent on this build — no Android TTS engine is installed; add one (eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech to enable a future `say`.
+
+Source: `scripts/android.sh`. Day-to-day usage reference: MAINTENANCE.md §1.
 
 ## Gotchas
 

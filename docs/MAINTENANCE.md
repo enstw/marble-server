@@ -109,38 +109,15 @@ android unlock --stayon
 
 Source: `scripts/android.sh`. State transitions via `dumpsys power | grep mWakefulness=` — `Awake` ↔ `Dozing`.
 
-### Audible alerts (`android beep` / `android play`)
-
-The same `android` dispatcher can make the phone play a sound — useful as a physical alert alongside the Telegram bridge. Getting there ruled out everything simpler first: the Ubuntu chroot has **no audio device** (`/dev/snd` absent, no PulseAudio), and this Lineage build ships **no tinyalsa** (`tinyplay`/`tinymix` absent), **no `stagefright`/`media` CLI**, and **no media-player app** that auto-plays a `file://` VIEW intent (it just opens the player's library). The sound card is `ukeemtpsndcard` and `audioserver`/vendor audio HAL are up, so the only clean path is **through Android's audio framework**.
-
-The chosen mechanism is **Termux:API's MediaPlayer**, dispatched via **Termux's `RunCommandService`**:
-
-- It must run as the **Termux uid** — `termux-media-player` invoked as root (via the chroot escape) **hangs** on the Termux:API socket round-trip, and this build has **no `su`** to drop uid. `RunCommandService` makes Termux execute the command as itself.
-- One-time device prereqs:
-  1. Install the **Termux:API APK** (same source as Termux — F-Droid app with F-Droid Termux, etc.; a source/signature mismatch makes `termux-*` calls hang) **and** `pkg install termux-api`.
-  2. Set `allow-external-apps = true` in `~/.termux/termux.properties`, then `termux-reload-settings` (or restart Termux). Without it, `RunCommandService` refuses with a "requires allow-external-apps" notification.
+### Audible alerts (`android beep` / `play` / `volume`)
 
 ```
-android beep                 # built-in gravitational-wave inspiral chirp (synthesized once to /sdcard via ffmpeg)
+android beep                 # built-in gravitational-wave inspiral chirp
 android play /sdcard/foo.mp3 # any file the Termux:API app can read (keep it on /sdcard)
-ssh moon-user android beep   # from a workstation
-android volume up            # raise the active stream one step (KEYCODE_VOLUME_UP)
-android volume down 3        # lower three steps (KEYCODE_VOLUME_DOWN x3)
+android volume up            # KEYCODE_VOLUME_UP on the active stream; `down [n]` lowers
 ```
 
-`android volume up|down [n]` sends `n` `KEYCODE_VOLUME_UP`/`DOWN` keyevents (via the same `input` path as `lock`/`unlock`, so the §2.8 agent-context caveat applies). Keyevents adjust the **active** stream — the media stream while audio is playing (e.g. right after `android beep`/`play`), otherwise the ring stream. Deterministic per-stream control (`cmd media_session volume --stream 3 --set/--get`) returned `Failed transaction` on this build, so it is intentionally not used.
-
-Under the hood `android beep`/`play` runs (as root, via `chroot /proc/1/root`):
-
-```
-am startservice --user 0 -n com.termux/com.termux.app.RunCommandService \
-  -a com.termux.RUN_COMMAND \
-  --es com.termux.RUN_COMMAND_PATH /data/data/com.termux/files/usr/bin/termux-media-player \
-  --esa com.termux.RUN_COMMAND_ARGUMENTS play,<file> \
-  --ez com.termux.RUN_COMMAND_BACKGROUND true
-```
-
-Source: `scripts/android.sh`. **Caveat (confirmed):** like `lock`/`unlock`, this is an Android binder call (`am startservice` → `system_server`), and it hits the same agent-context limitation as §2.8 — **verified working from an interactive ssh session, but an agent-driven `android beep` from the long-running Claude/channel session fails with `cmd: Failure calling service activity: Failed transaction (2147483646)`.** So the persistent agent cannot beep directly; trigger audible alerts from an interactive/ssh context — e.g. the agent can shell back through sshd (`ssh moon-user android beep`) to regain a working context, or a watcher running in an ssh/boot context can fire it. TTS (`termux-tts-speak`) is also wired in Termux:API but produced **no sound** — this build has no Android TTS engine installed; add one (e.g. eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech before a `say` subcommand would be worth adding.
+`beep`/`play` route through Termux:API's MediaPlayer; `volume` sends `KEYCODE_VOLUME_UP`/`DOWN` keyevents (active stream — media while audio is playing, else ring). **One-time provisioning** (Termux:API APK + `termux-api` + `allow-external-apps=true` + chroot `ffmpeg`) and the full mechanism live in INSTALLATION.md Phase 5 §6 — they are install-time steps, not maintenance. **Caveat:** like `lock`/`unlock`, these are `system_server` binder calls, so they work from an interactive ssh session but fail from the long-running Claude/channel session with `Failure calling service activity: Failed transaction (2147483646)` (§2.8) — fire them from an ssh context (e.g. `ssh moon-user android beep`).
 
 ### In-chroot deploys without adb (`termux` helper)
 
