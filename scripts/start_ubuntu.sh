@@ -75,7 +75,23 @@ bind_once /sys    "$UBUNTU/sys"    --rbind
 # non-fatal: a missing /sdcard at boot must never block sshd. If you need
 # /sdcard in an already-running chroot, bind it later once storage is up:
 #   su -c 'mount --bind /sdcard /data/data/com.termux/files/home/ubuntu/sdcard'
-bind_once /sdcard "$UBUNTU/sdcard" || echo "WARN: /sdcard not ready at boot; skipped (sshd/tailscale unaffected)"
+# Positively verify + log the outcome on every boot (not only on failure) so the
+# boot record carries proof: `grep sdcard .../moon-ssh-boot.log` becomes an
+# assertable signal instead of "absence of WARN". /proc/mounts is the only
+# reliable test — a /dev/fuse mount listed there is up; an `ls` of the bind path
+# from outside the chroot is denied by the emulated-storage FUSE daemon (SELinux)
+# even when the mount is perfectly healthy, so it must never be the success check.
+# `if bind_once …` keeps the failure non-fatal under `set -e` (a failed condition
+# is tested, not aborted), preserving "a missing /sdcard must never block sshd."
+if bind_once /sdcard "$UBUNTU/sdcard"; then
+    if is_mounted "$UBUNTU/sdcard"; then
+        echo "OK: /sdcard bound (fuse mount present in /proc/mounts)"
+    else
+        echo "WARN: /sdcard bind returned 0 but is absent from /proc/mounts"
+    fi
+else
+    echo "WARN: /sdcard not ready at boot; skipped (sshd/tailscale unaffected)"
+fi
 
 is_mounted "$UBUNTU/tmp" || mount -t tmpfs tmpfs "$UBUNTU/tmp"
 
