@@ -730,14 +730,16 @@ android volume up             # KEYCODE_VOLUME_UP on the active stream; `down [n
 Under the hood `beep`/`play` run, as root via `chroot /proc/1/root`:
 
 ```
-am startservice --user 0 -n com.termux/com.termux.app.RunCommandService \
+am start-foreground-service --user 0 -n com.termux/com.termux.app.RunCommandService \
   -a com.termux.RUN_COMMAND \
   --es com.termux.RUN_COMMAND_PATH /data/data/com.termux/files/usr/bin/termux-media-player \
   --esa com.termux.RUN_COMMAND_ARGUMENTS play,<file> \
   --ez com.termux.RUN_COMMAND_BACKGROUND true
 ```
 
-**Controlling tty:** like `lock`/`unlock`, these are `system_server` binder calls (`am startservice`, `input keyevent`) that fail with `Failure calling service …: Failed transaction (2147483646)` when the caller has **no controlling terminal**. `android.sh` auto-allocates a pty when invoked without one, so beep/play/volume work from non-interactive callers (cron, the boot hook, an AI agent's tool-exec, `ssh` without `-t`) as well as interactive shells — see MAINTENANCE.md §2.8 for the root cause and the fix. TTS (`termux-tts-speak`) is wired in Termux:API but is silent on this build — no Android TTS engine is installed; add one (eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech to enable a future `say`.
+**Background cold-start:** `beep`/`play` use `am start-foreground-service` (not `startservice`). On Android 8+ the background-execution limit bars `startservice` from cold-starting a backgrounded or dead app's process for a *background* service — when Termux isn't running, `am startservice` fails with `Error: app is in background uid null` (no UidRecord for Termux). `RunCommandService` promotes itself to a foreground service, so `start-foreground-service` is the sanctioned cold-start from any background caller (agent, cron, boot hook), with no need for Termux to be open first. See MAINTENANCE.md §2.10.
+
+**Controlling tty:** like `lock`/`unlock`, these are `system_server` binder calls (`am start-foreground-service`, `input keyevent`) that fail with `Failure calling service …: Failed transaction (2147483646)` when the caller has **no controlling terminal**. `android.sh` auto-allocates a pty when invoked without one, so beep/play/volume work from non-interactive callers (cron, the boot hook, an AI agent's tool-exec, `ssh` without `-t`) as well as interactive shells — see MAINTENANCE.md §2.8 for the root cause and the fix. TTS (`termux-tts-speak`) is wired in Termux:API but is silent on this build — no Android TTS engine is installed; add one (eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech to enable a future `say`.
 
 Source: `scripts/android.sh`. Day-to-day usage reference: MAINTENANCE.md §1.
 

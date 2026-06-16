@@ -281,6 +281,19 @@ sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh
 ```
 Verify: `ssh moon reboot` returns within ~1 s (not after a multi-second socket hang), and the device reboots.
 
+### 2.10 `android beep`/`play` silent when Termux wasn't running — `startservice` can't cold-start a backgrounded app (**fixed in repo, pending deploy**)
+
+After the §2.8 pty fix, `android beep` from a no-tty agent context still failed — but at a *later* stage and with a different error. `am` printed `Starting service: Intent { … cmp=com.termux/.app.RunCommandService }` (so the chroot escape **and** the pty both worked), then Android refused: `Error: app is in background uid null`. The `uid null` is the tell — there was **no running Termux process** (no UidRecord), and Android 8+'s background-execution limit forbids `am startservice` from cold-starting an app's process to deliver a *background* service. (§2.8's verification happened to run while Termux was foregrounded, so it returned a clean `Starting service: …` at the time and the latent issue stayed hidden.)
+
+**Fix:** `scripts/android.sh` now calls `am start-foreground-service` instead of `am startservice`. `RunCommandService` promotes itself to a foreground service (`startForeground()` within the 5 s window), and `start-foreground-service` is the sanctioned call for cold-starting such a service from a background caller — so `beep`/`play` now work even when Termux is dead or backgrounded (the normal case for an agent, cron, or the boot hook). The `--ez …RUN_COMMAND_BACKGROUND true` extra is unchanged (it governs the *command's* backgrounding, not the service's foreground state).
+
+Redeploy via the in-chroot `termux` path (same as §2.8–2.9):
+```
+sudo ./scripts/termux.sh cp scripts/android.sh
+sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh   # bounces sshd at the end
+```
+Lighter alternative when you don't want the sshd bounce (e.g. mid-session): stage to the Android side, then install the live copy directly — `sudo ./scripts/termux.sh cp scripts/android.sh && sudo install -m 0755 -o root -g root scripts/android.sh /usr/local/sbin/android`. Verify (from a no-`sudo` `user` shell, with Termux **not** open): `android beep` plays the tone and returns rc=0 — no `app is in background` error.
+
 ## 3. Troubleshooting
 
 ### `ssh moon` times out after a reboot

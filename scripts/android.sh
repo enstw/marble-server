@@ -175,9 +175,22 @@ case "$cmd" in
         # RunCommandService runs termux-media-player as the Termux uid. Pass the
         # binary path and file as positional args after -c (become $1/$2 in the
         # Android shell) so paths with spaces survive without nested quoting.
+        #
+        # `start-foreground-service`, NOT `startservice`: on Android 8+ the
+        # background-execution limit forbids `startservice` from cold-starting a
+        # backgrounded/dead app's process to deliver a *background* service. When
+        # Termux isn't running, `am startservice` fails with "Error: app is in
+        # background uid null" (the `uid null` = no UidRecord, i.e. no Termux
+        # process at all). RunCommandService promotes itself to a foreground
+        # service (startForeground() within the 5s window), so
+        # start-foreground-service is the sanctioned way to cold-start it from
+        # any background caller (agent, cron, boot hook) without Termux needing
+        # to be open first. The --ez RUN_COMMAND_BACKGROUND extra is unrelated:
+        # it governs the *command's* backgrounding, not the service's foreground
+        # state. See docs/MAINTENANCE.md §2.10.
         exec chroot /proc/1/root /system/bin/sh -c '
             export PATH=/system/bin:/system/xbin
-            exec am startservice --user 0 \
+            exec am start-foreground-service --user 0 \
                 -n com.termux/com.termux.app.RunCommandService \
                 -a com.termux.RUN_COMMAND \
                 --es com.termux.RUN_COMMAND_PATH "$1" \
