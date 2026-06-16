@@ -148,13 +148,18 @@ case "$cmd" in
                 # A ~3s gravitational-wave inspiral "chirp" (à la LIGO): the
                 # Newtonian inspiral phase Phi ~ (tc-t)^(5/8) makes the instantaneous
                 # freq diverge toward the merge at tc=2.7s; strain amplitude ~
-                # (tc-t)^(-1/4) swells in; then a damped ~200Hz ringdown. NB:
+                # (tc-t)^(-1/4) swells in; then a damped ~200Hz ringdown.
+                # Post-synthesis the -af chain stretches it to 2x length with
+                # atempo=0.5 (pitch preserved -> the freq sweep & 200Hz ringdown
+                # are unchanged, NOT a resample), then atrim drops the first half:
+                # output is still ~3s but skips the slow quiet early inspiral and
+                # dwells on the climb into merger. NB:
                 # ffmpeg's `sine` lavfi source is low-amplitude (~-25dB), so we
                 # drive aevalsrc into a limiter and reclaim the headroom
                 # (volume=2.9dB) -> mean ~-4dB, peak ~0dBFS (loud).
                 ffmpeg -hide_banner -loglevel error -f lavfi \
                     -i "aevalsrc='if(lt(t,2.7),min(0.25*pow(max(2.7-t,0.0008),-0.25),0.95)*sin(802*pow(max(2.7-t,0.0008),0.625)),0.95*exp(-(t-2.7)/0.12)*sin(2*PI*200*(t-2.7))):d=3.0:s=48000'" \
-                    -af "afade=t=in:st=0:d=0.01,afade=t=out:st=2.9:d=0.1,alimiter=level_in=4:limit=0.99,volume=2.9dB,aformat=channel_layouts=stereo" \
+                    -af "atempo=0.5,atrim=start=3,asetpts=N/SR/TB,afade=t=in:st=0:d=0.01,afade=t=out:st=2.9:d=0.1,alimiter=level_in=4:limit=0.99,volume=2.9dB,aformat=channel_layouts=stereo" \
                     -c:a pcm_s16le -y "$file" \
                     || { echo "android beep: failed to synthesize tone" >&2; exit 1; }
             fi
