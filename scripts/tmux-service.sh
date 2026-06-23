@@ -1,8 +1,16 @@
 #!/bin/bash
 # tmux-service — run a long-lived command inside a detached tmux session with
-# crash-loop recovery and log tee. This is the chroot's stand-in for a systemd
-# unit: no PID 1 here, so a named tmux session is our "unit" and the while-true
-# wrapper is our Restart=always.
+# crash-loop recovery. This is the chroot's stand-in for a systemd unit: no PID 1
+# here, so a named tmux session is our "unit" and the while-true wrapper is our
+# Restart=always.
+#
+# The supervised command runs ON the tmux pane's pty (a real tty that carries the
+# pane's size and receives SIGWINCH on resize), so an interactive / full-screen TUI
+# (e.g. `claude --channels`) stays interactive AND tracks the terminal — no external
+# pty shim, no pinned width. Only THIS supervisor's bookkeeping (start / exited /
+# fast-fail / circuit-open) is written to the logfile; the command's own output lives
+# in the pane — view it live with `tmux attach -t <name>` (and in the command's own
+# files, if it keeps any).
 #
 # Installed at /usr/local/bin/tmux-service by agents_setup.sh. Source of truth
 # is scripts/tmux-service.sh in the repo.
@@ -10,8 +18,7 @@
 # Usage: tmux-service <name> -- <cmd> [args...]
 #
 # Example (run as user):
-#   tmux-service openclaw -- openclaw gateway --port 18789
-#   tmux-service hermes   -- hermes gateway start
+#   tmux-service work-channel -- /home/user/cowork/work/bin/channel-launch
 #
 # Behavior:
 #   - If a tmux session named <name> already exists, it is killed first.
@@ -20,7 +27,8 @@
 #     back off exponentially (BASE_SLEEP→BACKOFF_CAP) and, after MAX_FAILS in a
 #     row, the circuit OPENS — the session logs "CIRCUIT OPEN" and exits instead
 #     of restart-storming. A run lasting >= HEALTHY_SECS resets the gate.
-#   - Log lives under $XDG_STATE_HOME/moon-agents (default ~/.local/state/moon-agents).
+#   - <cmd> runs on the pane pty; only supervisor bookkeeping is logged.
+#   - Bookkeeping log lives under $XDG_STATE_HOME/moon-agents (default ~/.local/state/moon-agents).
 #   - Attach over ssh:  tmux attach -t <name>
 #   - Stop the service: tmux kill-session -t <name>
 #   - Tune per-invocation via env: TMUX_SVC_HEALTHY_SECS / _MAX_FAILS /
@@ -79,28 +87,38 @@ MAX_FAILS=${TMUX_SVC_MAX_FAILS:-10}         # consecutive fast-fails → open ci
 BASE_SLEEP=${TMUX_SVC_BASE_SLEEP:-2}        # restart delay after a healthy run / 1st fail
 BACKOFF_CAP=${TMUX_SVC_BACKOFF_CAP:-300}    # max backoff between restart attempts (s)
 
+# Logging is bookkeeping-only. We do NOT pipe the loop through `tee`: a pipe is not
+# a tty, and a piped stdout would push an interactive command into headless mode
+# (claude --channels flips to --print and dies — incident 2026-06-15, formerly
+# worked around with an external pty). Leaving $CMD unredirected keeps it on the
+# pane's pty (a real tty with the pane's real size + SIGWINCH), so it stays
+# interactive and tracks the terminal with no pinned width. Each supervisor echo is
+# redirected to $LOG instead; the command's own output stays in the pane.
+LOG_BK=" >> \"$LOG\""
+
 # The loop body is built as a single string the tmux pane's shell will exec.
 # Build-time vars ($CMD/$NAME/$LOG + the numeric knobs) are substituted now;
 # runtime vars (\$rc/\$dur/\$fails/\$delay/\$(date …)) are escaped to evaluate
-# inside the pane.
+# inside the pane. $LOG_BK sends each bookkeeping echo to the logfile; $CMD is left
+# unredirected so it inherits the pane pty.
 LOOP="fails=0; delay=$BASE_SLEEP; \
 while true; do \
-  t0=\$(date +%s); echo \"[\$(date -Is)] start $NAME\"; \
+  t0=\$(date +%s); echo \"[\$(date -Is)] start $NAME\"$LOG_BK; \
   $CMD; rc=\$?; \
   dur=\$(( \$(date +%s) - t0 )); \
-  echo \"[\$(date -Is)] $NAME exited rc=\$rc after \${dur}s\"; \
+  echo \"[\$(date -Is)] $NAME exited rc=\$rc after \${dur}s\"$LOG_BK; \
   if [ \"\$dur\" -ge $HEALTHY_SECS ]; then fails=0; delay=$BASE_SLEEP; \
   else \
     fails=\$(( fails + 1 )); \
     if [ \"\$fails\" -ge $MAX_FAILS ]; then \
-      echo \"[\$(date -Is)] $NAME CIRCUIT OPEN: \$fails consecutive fast-fails (<${HEALTHY_SECS}s) — stopping restarts. Fix the command, then re-run: tmux-service $NAME -- ...\"; \
+      echo \"[\$(date -Is)] $NAME CIRCUIT OPEN: \$fails consecutive fast-fails (<${HEALTHY_SECS}s) — stopping restarts. Fix the command, then re-run: tmux-service $NAME -- ...\"$LOG_BK; \
       break; \
     fi; \
-    echo \"[\$(date -Is)] $NAME fast-fail #\$fails — backing off \${delay}s\"; \
+    echo \"[\$(date -Is)] $NAME fast-fail #\$fails — backing off \${delay}s\"$LOG_BK; \
   fi; \
   sleep \$delay; \
   delay=\$(( delay * 2 )); [ \$delay -gt $BACKOFF_CAP ] && delay=$BACKOFF_CAP; \
-done 2>&1 | tee -a \"$LOG\""
+done"
 
 if tmux has-session -t "$NAME" 2>/dev/null; then
     tmux kill-session -t "$NAME"
