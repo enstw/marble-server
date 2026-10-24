@@ -205,7 +205,8 @@ Confirm with `/etc/os-release` (`PRETTY_NAME` without `-beta`). This box made th
 | Repo | Suite | Notes |
 | :--- | :--- | :--- |
 | Tailscale (`/etc/apt/sources.list.d/tailscale.list`) | `resolute` | Flipped from `noble` on 2026-10-25 (the original install predated a `resolute` pool; the old file is at `/root/tailscale.list.noble.bak`). On the next Ubuntu release, flip the same way once `https://pkgs.tailscale.com/stable/ubuntu/dists/<codename>/InRelease` returns 200 — the bare `ubuntu/<codename>/` path 404s even when the pool exists: `sed -i 's/<old>/<new>/g'` on the list file (it names the codename in a comment and on the `deb` line), then `apt update && apt install --only-upgrade tailscale`, then restart tailscaled with `/etc/host-hooks/20-tailscale.hook`. |
-| NodeSource (`nodesource.list`) | `nodistro` | Distro-agnostic by design, so it never needs a flip. The `nodejs` package is **not** installed from it: `node` is pnpm-managed (`~/.local/share/pnpm/bin/node`). |
+
+These are the only two sources (`ubuntu.sources` + `tailscale.list`). NodeSource was removed on 2026-10-25 (files kept in `/root/nodesource-removed-20261025/`): it was never the source of `node`, which is pnpm-managed (`~/.local/share/pnpm/bin/node`). `agents_setup.sh` still adds it back on a re-run (see §2.6).
 
 Packages outside any repo: `quarto` (local `.deb`, upgrade by hand). To list everything whose installed version is not from a `resolute` suite: `apt list --installed '?narrow(?installed, ?not(?codename(resolute)))'` — Ubuntu packages appear there too when their installed version has been superseded by an update; `apt full-upgrade` clears those.
 
@@ -222,6 +223,7 @@ Deploy changed scripts with the `termux` helper (§1 "In-chroot deploys without 
 | Item | Repo commit | Deploy | Verify |
 | :--- | :--- | :--- | :--- |
 | `reboot` finds sshd by an ancestry walk and detaches tmux first | `36f2225` | installed copy matches the repo (checked 2026-10-25); only the behavior check is left | `ssh moon reboot` returns within ~1 s and the device reboots |
+| **OPEN — `agents_setup.sh` still installs Node from NodeSource**, but the box runs pnpm-managed Node. It checks `command -v node` as root, whose PATH lacks `~user/.local/share/pnpm/bin`, so any re-run (including a chroot rebuild) re-adds `nodesource.list` and installs a second, apt-owned `nodejs` | — | needs a decision: switch the script to pnpm-provisioned Node, or keep NodeSource for root and say so | after the change, re-running `agents_setup.sh` leaves `/etc/apt/sources.list.d/` with only `ubuntu.sources` + `tailscale.list` |
 
 ## 3. Troubleshooting
 
