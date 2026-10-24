@@ -223,7 +223,7 @@ Deploy changed scripts with the `termux` helper (§1 "In-chroot deploys without 
 | Item | Repo commit | Deploy | Verify |
 | :--- | :--- | :--- | :--- |
 | `reboot` finds sshd by an ancestry walk and detaches tmux first | `36f2225` | installed copy matches the repo (checked 2026-10-25); only the behavior check is left | `ssh moon reboot` returns within ~1 s and the device reboots |
-| OpenClaw example removed from the `50-agents.hook` template (and from `agents_setup.sh` comments) | this commit | the device copies still carry it: `/etc/host-hooks/50-agents.hook.disabled` (identical to the old template, so safe to overwrite — `agents_setup.sh` never replaces an existing copy) plus the staged `50-agents.hook` and `agents_setup.sh` in Termux home. `termux.sh cp` both files, then `sudo install -m 0755 scripts/host-hooks/50-agents.hook /etc/host-hooks/50-agents.hook.disabled` | `grep -ril openclaw /etc/host-hooks/` prints nothing, and the Termux-home copies hash-match the repo |
+| OpenClaw example removed from the `50-agents.hook` template (and from `agents_setup.sh` comments) | `a96a392` | the device copies still carry it: `/etc/host-hooks/50-agents.hook.disabled` (identical to the old template, so safe to overwrite — `agents_setup.sh` never replaces an existing copy) plus the staged `50-agents.hook` and `agents_setup.sh` in Termux home. `termux.sh cp` both files, then `sudo install -m 0755 scripts/host-hooks/50-agents.hook /etc/host-hooks/50-agents.hook.disabled` | `grep -ril openclaw /etc/host-hooks/` prints nothing, and the Termux-home copies hash-match the repo |
 
 ## 3. Troubleshooting
 
