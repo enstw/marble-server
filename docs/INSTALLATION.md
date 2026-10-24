@@ -397,7 +397,7 @@ Test: `ssh moon-user` (pubkey-only, reuses the existing Mac key). Tailscale iden
 
 ### tmux auto-start
 
-Interactive SSH sessions automatically attach to an existing `ssh_`-prefixed tmux session or create a new one. This ensures your shell survives connection drops. It explicitly ignores background AI agents (like `openclaw` or `hermes`) which do not use the `ssh_` prefix.
+Interactive SSH sessions automatically attach to an existing `ssh_`-prefixed tmux session or create a new one. This ensures your shell survives connection drops. It explicitly ignores background AI agents (like `hermes`) which do not use the `ssh_` prefix.
 
 
 ---
@@ -510,7 +510,7 @@ All addable later without rework. The chroot is already tailnet-reachable; these
 
 # Phase 5 — AI-agent groundwork (tmux + toolchains)
 
-Install the base toolchains and session-persistence pattern that lets long-running AI agents (OpenClaw, Hermes Agent, anything else) run inside the chroot, survive SSH disconnects, auto-restart on crash, and optionally come up at boot. This phase ships the infrastructure; per-agent install is a separate phase doc.
+Install the base toolchains and session-persistence pattern that lets long-running AI agents (Hermes Agent, anything else) run inside the chroot, survive SSH disconnects, auto-restart on crash, and optionally come up at boot. This phase ships the infrastructure; per-agent install is a separate phase doc.
 
 Prerequisite: phases 2–3 complete — chroot is up, `user` account exists, sshd starts at boot.
 
@@ -547,7 +547,7 @@ adb shell su -c 'sh /data/data/com.termux/files/home/agents_setup.sh'
 
 1. `apt install tmux curl ca-certificates gpg git` — session manager + the basics any agent's installer will need.
 1. Runs Astral's `uv` installer as `user` → `~/.local/bin/uv`. User-scope keeps Python graphs out of `/usr`. Matches the "uv, never pip" rule in `~/.claude/CLAUDE.md`.
-1. As `user`: installs pnpm (official installer, `PNPM_HOME=~/.local/share/pnpm`) if missing, then `pnpm runtime set node 24 -g` unless `node -v` already reports v24+. pnpm is the only JS package manager on the box and provisions Node itself — there is no apt/NodeSource Node. OpenClaw recommends Node 24. (The pnpm-missing and Node-missing branches have only run on a fresh install, not been re-tested since the 2026-10-25 switch from NodeSource.)
+1. As `user`: installs pnpm (official installer, `PNPM_HOME=~/.local/share/pnpm`) if missing, then `pnpm runtime set node 24 -g` unless `node -v` already reports v24+. pnpm is the only JS package manager on the box and provisions Node itself — there is no apt/NodeSource Node. (The pnpm-missing and Node-missing branches have only run on a fresh install, not been re-tested since the 2026-10-25 switch from NodeSource.)
 1. Installs the `tmux-service` helper at `/usr/local/bin/tmux-service` (source: `scripts/tmux-service.sh`). `/usr/local` is dpkg-untouched, so it survives `apt upgrade`.
 
 Verify from inside the chroot (`ssh moon-user`):
@@ -644,7 +644,7 @@ sudo install -m 0755 scripts/host-hooks/10-sshd.hook /etc/host-hooks/10-sshd.hoo
 run-as <user> -- tmux-service <name> -- <start-cmd> [args...]
 ```
 
-The template carries three ready-to-uncomment examples (FreelOAder, Hermes, OpenClaw); their command lines and inline caveats live in the hook itself. The fuller gotchas for the two that need them:
+The template carries two ready-to-uncomment examples (FreelOAder, Hermes) plus a generic one; their command lines and inline caveats live in the hook itself. The fuller gotchas:
 
 **FreelOAder** — local OpenAI-compatible proxy in front of the claude/codex CLIs:
 
@@ -684,7 +684,6 @@ ssh moon-user -t tmux ls
 Add to Mac `~/.ssh/config` alongside the existing `moon-user` entry — nothing new to configure, but a one-liner to jump straight into an agent session is convenient:
 
 ```
-alias agent-openclaw='ssh moon-user -t tmux attach -t openclaw'
 alias agent-hermes='ssh moon-user -t tmux attach -t hermes'
 ```
 
@@ -694,12 +693,12 @@ alias agent-hermes='ssh moon-user -t tmux attach -t hermes'
 
 With the groundwork in place, adding an agent is:
 
-1. Install the agent (inside the chroot as `user`) — e.g. `pnpm add -g openclaw` or `uv tool install hermes` / upstream installer.
+1. Install the agent (inside the chroot as `user`) — e.g. `pnpm add -g <pkg>`, `uv tool install hermes`, or the upstream installer.
 1. First-run configuration (API keys, pairing, whatever the agent's onboarding requires).
 1. Add a `run-as user -- tmux-service <name> -- <start-cmd>` line to `scripts/host-hooks/50-agents.hook` and `sudo install` it to `/etc/host-hooks/`.
 1. `sudo mv /etc/host-hooks/50-agents.hook.disabled /etc/host-hooks/50-agents.hook` to enable, if not already.
 
-Per-agent playbooks (OpenClaw, Hermes) live in their own phase docs — this one stops at groundwork.
+Per-agent setup lives with each agent (its own repo or docs) — this phase stops at groundwork.
 
 ## 6. (Optional) Audible alerts via Termux:API
 

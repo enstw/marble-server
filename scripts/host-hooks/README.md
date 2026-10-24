@@ -18,7 +18,7 @@ This README is just the contract for writing/editing a hook.
 | :--- | :--- | :--- |
 | `10-sshd.hook` | start OpenSSH (port 2222) | enabled |
 | `20-tailscale.hook` | start tailscaled (userspace networking) + `tailscale up` | enabled |
-| `50-agents.hook` | **template** — launches the AI agents you uncomment/add (freeloader, hermes, openclaw examples included) | **disabled** (deployed as `.disabled`) |
+| `50-agents.hook` | **template** — launches the AI agents you uncomment/add (freeloader, hermes examples included) | **disabled** (deployed as `.disabled`) |
 | `60-resource.hook` | apply the static CPU max-freq cap (`/etc/moon-resource.conf`) + start the passive resource logger (`moon-resource-monitor` → `/var/log/moon-resource.log`) | enabled |
 
 Numeric prefix = run order. Keep gaps (10/20/50) so new hooks can slot between.

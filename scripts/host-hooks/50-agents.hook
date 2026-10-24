@@ -19,8 +19,9 @@
 #   run-as        drop root -> the owning user (su -l <user> -s /bin/sh -c …;
 #                 gives the agent a clean login env + the user's PATH). See
 #                 scripts/run-as.sh.
-#   tmux-service  supervise it: named detached tmux session, while-true crash
-#                 loop, log tee to ~/.local/state/moon-agents/<name>.log. The
+#   tmux-service  supervise it: named detached tmux session, restart loop with
+#                 a crash-loop guard, supervisor log in
+#                 ~/.local/state/moon-agents/<name>.log. The
 #                 chroot has no systemd, so this is the "unit". See
 #                 scripts/tmux-service.sh.
 #
@@ -47,8 +48,5 @@ set -e
 # from a prior boot before binding the gateway socket. Full gotchas:
 # docs/INSTALLATION.md § "Configuring which agents start".
 # run-as user -- tmux-service hermes -- hermes gateway run --replace
-
-# --- OpenClaw (example) ------------------------------------------------------
-# run-as user -- tmux-service openclaw -- openclaw gateway --port 18789
 
 # --- Your agents below -------------------------------------------------------

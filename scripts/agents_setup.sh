@@ -3,7 +3,7 @@
 #
 # Installs:
 #   - tmux (session persistence + detach/attach — our no-systemd workaround)
-#   - pnpm + Node 24 (OpenClaw and other Node-based agents; user-scope)
+#   - pnpm + Node 24 (Node-based agents; user-scope)
 #   - uv via Astral (Hermes and other Python-based agents; user-scope)
 #   - /usr/local/bin/tmux-service helper (see scripts/tmux-service.sh)
 #
@@ -69,7 +69,7 @@ apt-get install -y tmux curl ca-certificates gpg git
 # Node comes from pnpm, also per-user: pnpm is the box's only JS package
 # manager and it provisions Node itself, so there is no apt/NodeSource Node
 # (which root would see, and agents would not). Pinned to major 24, the
-# version OpenClaw's docs recommend. The skip test runs as `user` — a root-side
+# box's current major. The skip test runs as `user` — a root-side
 # `command -v node` can't see the pnpm shim and would reinstall every run.
 su -l user -s /bin/sh <<'USER_CMD'
 set -e
