@@ -430,20 +430,18 @@ Prerequisite: phase 3 complete — OpenSSH autostarts at boot, `ssh moon` works 
 
 ## 1. Install Tailscale in the chroot
 
-Enter the chroot and follow Tailscale's apt install — **but pin the repo to `noble`**, not `resolute`. At time of setup Tailscale had no `resolute` (26.04) pool yet. Safe because Tailscale binaries are statically-linked Go.
+Enter the chroot and follow Tailscale's apt install for `resolute`. (The original install pinned `noble` because no `resolute` pool existed yet; MAINTENANCE.md §2.4 has the flip, applied to this box on 2026-10-25.)
 
 Inside `start_ubuntu.sh`:
 
 ```
-curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg | \
+curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/resolute.noarmor.gpg | \
     tee /usr/share/keyrings/tailscale-archive-keyring.gpg > /dev/null
-curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list | \
+curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/resolute.tailscale-keyring.list | \
     tee /etc/apt/sources.list.d/tailscale.list
 apt-get update
 apt-get install -y tailscale
 ```
-
-Tailscale now publishes a `resolute` pool; the flip procedure and pin status are in MAINTENANCE.md §2.4.
 
 ## 2. First-run auth
 

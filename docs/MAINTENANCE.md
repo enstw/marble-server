@@ -187,7 +187,8 @@ sudo apt update && sudo apt full-upgrade -y
 
 Run monthly-ish. Watch for:
 - **openssh-server upgrades** — config in `/etc/ssh/sshd_config.d/10-moon.conf` survives; main `sshd_config` may get overwritten (leave it default).
-- **systemd-resolved** getting pulled in as a dep. `start_ubuntu.sh` already handles the dangling `/etc/resolv.conf` symlink on every chroot entry; nothing to do.
+- **Conffile prompts abort `apt upgrade -y`.** `-y` does not answer dpkg's "modified config file" prompt, so the package is left unpacked but unconfigured (`dpkg --audit` lists it, and every later apt run errors on it again). This hit `systemd-resolved` from 2026-10-21 to 2026-10-25. Upgrade with `sudo apt -o Dpkg::Options::=--force-confold full-upgrade -y` to keep local configs; to clear a stuck one, `sudo dpkg --configure -a --force-confold`, then check that `dpkg --audit` prints nothing.
+- **systemd-resolved** is installed but never runs (no systemd). `start_ubuntu.sh` rewrites `/etc/resolv.conf` as a plain file on every chroot entry, so a postinst that turns it into a symlink only lasts until the next entry; until then, check `getent hosts archive.ubuntu.com` after an upgrade that touches it.
 
 ### 2.3 Ubuntu beta → final LTS
 
@@ -199,27 +200,14 @@ ssh moon "sudo apt update && sudo apt full-upgrade -y"
 
 Confirm with `/etc/os-release` (`PRETTY_NAME` without `-beta`). This box made the 26.04 beta → final jump this way on 2026-04-21; keep the procedure for the next LTS beta cycle. Ubuntu Base is minimized — `apt install unminimize` plus the `--reinstall` pass it triggers restores man pages, docs, and locales (done on this box).
 
-### 2.4 Tailscale repo pin: `noble` → `resolute`
+### 2.4 Third-party apt repos
 
-Installed pinned to `noble` because Tailscale had no `resolute` (26.04) pool at install time. The `resolute` pool was live as of 2026-04-21; the live box was **still on `noble`** as of 2026-10-25 (`/etc/apt/sources.list.d/tailscale.list`). Re-verify the pool before switching (note the `dists/<codename>/InRelease` path; the bare `ubuntu/<codename>/` directory returns 404 even when the pool exists):
+| Repo | Suite | Notes |
+| :--- | :--- | :--- |
+| Tailscale (`/etc/apt/sources.list.d/tailscale.list`) | `resolute` | Flipped from `noble` on 2026-10-25 (the original install predated a `resolute` pool; the old file is at `/root/tailscale.list.noble.bak`). On the next Ubuntu release, flip the same way once `https://pkgs.tailscale.com/stable/ubuntu/dists/<codename>/InRelease` returns 200 — the bare `ubuntu/<codename>/` path 404s even when the pool exists: `sed -i 's/<old>/<new>/g'` on the list file (it names the codename in a comment and on the `deb` line), then `apt update && apt install --only-upgrade tailscale`, then restart tailscaled with `/etc/host-hooks/20-tailscale.hook`. |
+| NodeSource (`nodesource.list`) | `nodistro` | Distro-agnostic by design, so it never needs a flip. The `nodejs` package is **not** installed from it: `node` is pnpm-managed (`~/.local/share/pnpm/bin/node`). |
 
-```
-ssh moon 'curl -sI https://pkgs.tailscale.com/stable/ubuntu/dists/resolute/InRelease | head -1'
-# HTTP/2 200 ← ok to flip
-```
-
-Flip:
-
-```
-ssh moon
-sudo sed -i 's|ubuntu noble|ubuntu resolute|g' /etc/apt/sources.list.d/tailscale.list
-sudo sed -i 's|# Tailscale packages for ubuntu noble|# Tailscale packages for ubuntu resolute|' /etc/apt/sources.list.d/tailscale.list
-sudo apt update && sudo apt install -y --only-upgrade tailscale
-```
-
-(Two `sed` calls because the file has the pool on the `deb …` line and a header comment; update both for consistency.)
-
-Safe anytime — Tailscale binaries are statically-linked Go, so staying on `noble` works indefinitely if the flip is deferred.
+Packages outside any repo: `quarto` (local `.deb`, upgrade by hand). To list everything whose installed version is not from a `resolute` suite: `apt list --installed '?narrow(?installed, ?not(?codename(resolute)))'` — Ubuntu packages appear there too when their installed version has been superseded by an update; `apt full-upgrade` clears those.
 
 ### 2.5 KSU-Next Manager upgrade
 
@@ -234,7 +222,6 @@ Deploy changed scripts with the `termux` helper (§1 "In-chroot deploys without 
 | Item | Repo commit | Deploy | Verify |
 | :--- | :--- | :--- | :--- |
 | `reboot` finds sshd by an ancestry walk and detaches tmux first | `36f2225` | installed copy matches the repo (checked 2026-10-25); only the behavior check is left | `ssh moon reboot` returns within ~1 s and the device reboots |
-| `tmux-service`: the copy staged in Termux home is the original `c6af01a` version (no crash-loop guard, still pipes through `tee`); the installed `/usr/local/bin/tmux-service` is current (`7aed43a`). A chroot rebuild would reinstall the stale copy through `agents_setup.sh` | `7aed43a` | `termux.sh cp scripts/tmux-service.sh` | `md5sum /data/data/com.termux/files/home/tmux-service.sh` matches `scripts/tmux-service.sh` |
 
 ## 3. Troubleshooting
 
