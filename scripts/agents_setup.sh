@@ -3,7 +3,7 @@
 #
 # Installs:
 #   - tmux (session persistence + detach/attach — our no-systemd workaround)
-#   - Node 24 via NodeSource (OpenClaw and other Node-based agents)
+#   - pnpm + Node 24 (OpenClaw and other Node-based agents; user-scope)
 #   - uv via Astral (Hermes and other Python-based agents; user-scope)
 #   - /usr/local/bin/tmux-service helper (see scripts/tmux-service.sh)
 #
@@ -59,40 +59,41 @@ apt-get install -y tmux curl ca-certificates gpg git
 # tmux config is owned by ssh_setup.sh because that script runs at boot and
 # needs to preserve default-shell, True Color, and mouse settings together.
 
-# Node 24 via NodeSource. Ubuntu 26.04's archive may ship a recent-enough Node
-# for OpenClaw (≥22.16), but NodeSource pins us to Node 24 explicitly — the
-# version OpenClaw's docs recommend. Skip reinstall if we already have Node 24+
-# to keep the script fast on re-runs.
-if ! command -v node >/dev/null 2>&1 || ! node -v | grep -qE '^v(2[4-9]|[3-9][0-9])\.'; then
-    install -d -m 0755 /etc/apt/keyrings
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-    chmod 0644 /etc/apt/keyrings/nodesource.gpg
-    echo 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main' \
-        > /etc/apt/sources.list.d/nodesource.list
-    apt-get update
-    apt-get install -y nodejs
-fi
-
 # uv installed per-user into ~/.local/bin. Keeps Python dependency graphs out
 # of /usr and matches the global "uv everywhere, never pip" preference.
 # Ubuntu's default ~/.profile already prepends ~/.local/bin to PATH when that
 # dir exists at login time, so no ~/.profile edit needed here — but we create
 # the dir up-front to guarantee the login-shell PATH picks it up on the first
 # ssh session after install.
+#
+# Node comes from pnpm, also per-user: pnpm is the box's only JS package
+# manager and it provisions Node itself, so there is no apt/NodeSource Node
+# (which root would see, and agents would not). Pinned to major 24, the
+# version OpenClaw's docs recommend. The skip test runs as `user` — a root-side
+# `command -v node` can't see the pnpm shim and would reinstall every run.
 su -l user -s /bin/sh <<'USER_CMD'
 set -e
 mkdir -p "$HOME/.local/bin"
 if ! command -v uv >/dev/null 2>&1; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
+
+export PNPM_HOME="$HOME/.local/share/pnpm"
+export PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
+if ! command -v pnpm >/dev/null 2>&1; then
+    # `pnpm setup` (run by the installer) edits the rc file of $SHELL; give it
+    # the login shell, not the /bin/sh this block runs under.
+    curl -fsSL https://get.pnpm.io/install.sh \
+        | SHELL="$(getent passwd "$(id -un)" | cut -d: -f7)" sh -
+fi
+if ! node -v 2>/dev/null | grep -qE '^v(2[4-9]|[3-9][0-9])\.'; then
+    pnpm runtime set node 24 -g
+fi
 USER_CMD
 
 echo --- versions ---
 tmux -V
-node --version
-npm --version
-su -l user -s /bin/sh -c 'PATH="$HOME/.local/bin:$PATH" uv --version'
+su -l user -s /bin/sh -c 'PATH="$HOME/.local/share/pnpm/bin:$HOME/.local/bin:$PATH"; node --version; pnpm --version; uv --version'
 echo --- helpers ---
 ls -l /usr/local/bin/tmux-service /usr/local/sbin/run-as   # run-as from ssh_setup.sh
 CHROOT_CMD

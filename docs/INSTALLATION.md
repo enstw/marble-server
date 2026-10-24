@@ -546,15 +546,16 @@ adb shell su -c 'sh /data/data/com.termux/files/home/agents_setup.sh'
 `agents_setup.sh` is idempotent. Each run:
 
 1. `apt install tmux curl ca-certificates gpg git` — session manager + the basics any agent's installer will need.
-1. Adds the NodeSource `node_24.x` apt repo (signed keyring under `/etc/apt/keyrings/nodesource.gpg`) and installs `nodejs`. Skipped if `node -v` already reports v24+. OpenClaw recommends Node 24; pinning to NodeSource avoids drift when Ubuntu bumps its archive version.
 1. Runs Astral's `uv` installer as `user` → `~/.local/bin/uv`. User-scope keeps Python graphs out of `/usr`. Matches the "uv, never pip" rule in `~/.claude/CLAUDE.md`.
+1. As `user`: installs pnpm (official installer, `PNPM_HOME=~/.local/share/pnpm`) if missing, then `pnpm runtime set node 24 -g` unless `node -v` already reports v24+. pnpm is the only JS package manager on the box and provisions Node itself — there is no apt/NodeSource Node. OpenClaw recommends Node 24. (The pnpm-missing and Node-missing branches have only run on a fresh install, not been re-tested since the 2026-10-25 switch from NodeSource.)
 1. Installs the `tmux-service` helper at `/usr/local/bin/tmux-service` (source: `scripts/tmux-service.sh`). `/usr/local` is dpkg-untouched, so it survives `apt upgrade`.
 
 Verify from inside the chroot (`ssh moon-user`):
 
 ```
 tmux -V                # tmux 3.x
-node --version         # v24.x
+node --version         # v24.x (pnpm shim: ~/.local/share/pnpm/bin/node)
+pnpm --version
 uv --version           # uv 0.x
 which tmux-service     # /usr/local/bin/tmux-service
 ```
@@ -693,7 +694,7 @@ alias agent-hermes='ssh moon-user -t tmux attach -t hermes'
 
 With the groundwork in place, adding an agent is:
 
-1. Install the agent (inside the chroot as `user`) — e.g. `npm i -g openclaw` or `uv tool install hermes` / upstream installer.
+1. Install the agent (inside the chroot as `user`) — e.g. `pnpm add -g openclaw` or `uv tool install hermes` / upstream installer.
 1. First-run configuration (API keys, pairing, whatever the agent's onboarding requires).
 1. Add a `run-as user -- tmux-service <name> -- <start-cmd>` line to `scripts/host-hooks/50-agents.hook` and `sudo install` it to `/etc/host-hooks/`.
 1. `sudo mv /etc/host-hooks/50-agents.hook.disabled /etc/host-hooks/50-agents.hook` to enable, if not already.
@@ -746,7 +747,7 @@ Source: `scripts/android.sh`. Day-to-day usage reference: MAINTENANCE.md §1.
 - **Agent output is not logged.** The supervisor log only records restarts; what the agent printed lives in its tmux pane (scrollback) and in whatever files the agent keeps itself. Attach to see it.
 - **A circuit-open service stays down.** After 10 consecutive fast-fails the session exits and nothing restarts it until you fix the command and re-run `tmux-service` (or reboot). `grep 'CIRCUIT OPEN' ~/.local/state/moon-agents/*.log` finds them.
 - **tmux server dies on reboot.** Expected — sessions are in-memory. Boot-time launch recreates them. If `50-agents.hook` is disabled (`.disabled` suffix), no agent services come back after a reboot.
-- **Node 24 from NodeSource pins major.** When Node 26+ comes out and an agent needs it, bump the repo line in `agents_setup.sh` (`node_24.x` → `node_26.x`) and re-run.
+- **Node is pinned to major 24.** When an agent needs a newer major, change `pnpm runtime set node 24` in `agents_setup.sh` (or run `pnpm runtime set node <major> -g` as `user`).
 - **`uv` installer fetches the latest release.** Pinned by the Astral install script, not by us. Re-running `agents_setup.sh` will upgrade `uv` in place; revert by `uv self update <old>` if an upgrade breaks a pinned tool.
 
 
