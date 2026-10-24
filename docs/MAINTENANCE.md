@@ -201,7 +201,7 @@ Confirm with `/etc/os-release` (`PRETTY_NAME` without `-beta`). This box made th
 
 ### 2.4 Tailscale repo pin: `noble` → `resolute`
 
-Installed pinned to `noble` because Tailscale had no `resolute` (26.04) pool at install time. The `resolute` pool was live as of 2026-04-21; whether the live box has been flipped is **not recorded** — check `/etc/apt/sources.list.d/tailscale.list`. Re-verify the pool before switching (note the `dists/<codename>/InRelease` path; the bare `ubuntu/<codename>/` directory returns 404 even when the pool exists):
+Installed pinned to `noble` because Tailscale had no `resolute` (26.04) pool at install time. The `resolute` pool was live as of 2026-04-21; the live box was **still on `noble`** as of 2026-10-25 (`/etc/apt/sources.list.d/tailscale.list`). Re-verify the pool before switching (note the `dists/<codename>/InRelease` path; the bare `ubuntu/<codename>/` directory returns 404 even when the pool exists):
 
 ```
 ssh moon 'curl -sI https://pkgs.tailscale.com/stable/ubuntu/dists/resolute/InRelease | head -1'
@@ -233,10 +233,8 @@ Deploy changed scripts with the `termux` helper (§1 "In-chroot deploys without 
 
 | Item | Repo commit | Deploy | Verify |
 | :--- | :--- | :--- | :--- |
-| `reboot` finds sshd by an ancestry walk and detaches tmux first | `36f2225` | `termux.sh cp scripts/reboot.sh`, then `termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh` (bounces sshd) | `ssh moon reboot` returns within ~1 s and the device reboots |
-| `android beep`/`play` use `am start-foreground-service` | `0757a30` | `termux.sh cp scripts/android.sh`, then `ssh_setup.sh` as above — or, without the sshd bounce, `sudo install -m 0755 -o root -g root scripts/android.sh /usr/local/sbin/android` | with Termux **not** open, a no-`sudo` `android beep` plays and returns rc=0 (no `app is in background`) |
-| `tmux-service` no longer pipes through `tee` | `7aed43a` | `termux.sh cp scripts/tmux-service.sh`, then `sudo install -m 0755 scripts/tmux-service.sh /usr/local/bin/tmux-service` | the agent log holds only supervisor bookkeeping lines; `claude --channels` stays interactive in its pane |
-| `start_ubuntu.sh`: `chmod 0644` on resolv.conf/hosts/hostname; non-fatal, logged `/sdcard` bind | `75558a1`, `db91639`, `6f9c703` | deploy not recorded — `termux.sh cp scripts/start_ubuntu.sh` (boot runs it from Termux home, so it takes effect on the next chroot entry) | after a boot, `ls -l /etc/resolv.conf` is `-rw-r--r--` and `/var/log/moon-ssh-boot.log` has an `OK: /sdcard bound` (or WARN) line |
+| `reboot` finds sshd by an ancestry walk and detaches tmux first | `36f2225` | installed copy matches the repo (checked 2026-10-25); only the behavior check is left | `ssh moon reboot` returns within ~1 s and the device reboots |
+| `tmux-service`: the copy staged in Termux home is the original `c6af01a` version (no crash-loop guard, still pipes through `tee`); the installed `/usr/local/bin/tmux-service` is current (`7aed43a`). A chroot rebuild would reinstall the stale copy through `agents_setup.sh` | `7aed43a` | `termux.sh cp scripts/tmux-service.sh` | `md5sum /data/data/com.termux/files/home/tmux-service.sh` matches `scripts/tmux-service.sh` |
 
 ## 3. Troubleshooting
 
