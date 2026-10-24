@@ -40,8 +40,8 @@
 # See docs/MAINTENANCE.md §1 "Audible alerts". The `am`/`input` binder calls
 # need a controlling tty; the dispatcher auto-allocates a pty when run without
 # one (see the pty re-exec above), so beep/play/volume — like lock/unlock —
-# now work from non-interactive callers too (agents, cron, the boot hook). This
-# resolves the former MAINTENANCE.md §2.8 "agent-context" limitation.
+# work from non-interactive callers too (agents, cron, the boot hook). Root
+# cause: docs/LESSONS.md §4.
 #
 # Deployment: ssh_setup.sh installs this at /usr/local/sbin/android (root-only,
 # since chroot needs CAP_SYS_CHROOT), with a NOPASSWD sudoers entry in
@@ -73,9 +73,8 @@ fi
 # <x>: Failed transaction (2147483646)". An interactive shell already has a tty
 # (this is a no-op there); a non-interactive caller — cron, the boot hook, an
 # AI agent's tool-exec, `ssh` without `-t` — does not, so re-exec on a pty.
-# This is the actual root cause behind the former MAINTENANCE.md §2.8
-# "agent-context" limitation (it was the missing tty, not the caller's
-# identity). python3's pty.spawn preserves argv directly; util-linux script(1)
+# It is the missing tty, not the caller's identity (docs/LESSONS.md §4).
+# python3's pty.spawn preserves argv directly; util-linux script(1)
 # is the fallback (force /bin/sh so the rebuilt single-quoted command parses
 # POSIXly). If neither exists we fall through — works from a real tty only.
 if [ -z "${ANDROID_PTY:-}" ] && [ ! -t 1 ]; then
@@ -187,7 +186,7 @@ case "$cmd" in
         # any background caller (agent, cron, boot hook) without Termux needing
         # to be open first. The --ez RUN_COMMAND_BACKGROUND extra is unrelated:
         # it governs the *command's* backgrounding, not the service's foreground
-        # state. See docs/MAINTENANCE.md §2.10.
+        # state. See docs/LESSONS.md §4.
         exec chroot /proc/1/root /system/bin/sh -c '
             export PATH=/system/bin:/system/xbin
             exec am start-foreground-service --user 0 \
@@ -213,8 +212,8 @@ case "$cmd" in
         esac
         [ "$steps" -ge 1 ] || { echo "android volume: steps must be >= 1" >&2; exit 2; }
         # Volume keyevents adjust the *active* stream — media while audio is
-        # playing, otherwise ring. Same chroot escape + agent-context caveat as
-        # lock/unlock (MAINTENANCE.md §2.8). Repeat the keyevent `steps` times.
+        # playing, otherwise ring. Same chroot escape + tty requirement as
+        # lock/unlock (pty re-exec above). Repeat the keyevent `steps` times.
         cmds=""
         i=0
         while [ "$i" -lt "$steps" ]; do cmds="$cmds input keyevent $key;"; i=$((i + 1)); done

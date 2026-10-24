@@ -117,7 +117,7 @@ android play /sdcard/foo.mp3 # any file the Termux:API app can read (keep it on 
 android volume up            # KEYCODE_VOLUME_UP on the active stream; `down [n]` lowers
 ```
 
-`beep`/`play` route through Termux:API's MediaPlayer; `volume` sends `KEYCODE_VOLUME_UP`/`DOWN` keyevents (active stream — media while audio is playing, else ring). **One-time provisioning** (Termux:API APK + `termux-api` + `allow-external-apps=true` + chroot `ffmpeg`) and the full mechanism live in INSTALLATION.md Phase 5 §6 — they are install-time steps, not maintenance. Like `lock`/`unlock`, these are `system_server` binder calls that need a controlling tty; `android.sh` auto-allocates a pty when invoked without one (cron, boot hook, agent tool-exec, `ssh` without `-t`), so they work from any caller — see §2.8 for the root cause (this was the former "agent-context" limitation).
+`beep`/`play` route through Termux:API's MediaPlayer; `volume` sends `KEYCODE_VOLUME_UP`/`DOWN` keyevents (active stream — media while audio is playing, else ring). **One-time provisioning** (Termux:API APK + `termux-api` + `allow-external-apps=true` + chroot `ffmpeg`) and the full mechanism live in INSTALLATION.md Phase 5 §6 — they are install-time steps, not maintenance. Like `lock`/`unlock`, these are `system_server` binder calls that need a controlling tty; `android.sh` auto-allocates a pty when invoked without one (cron, boot hook, agent tool-exec, `ssh` without `-t`), so they work from any caller — root cause in `docs/LESSONS.md` §4.
 
 ### In-chroot deploys without adb (`termux` helper)
 
@@ -129,7 +129,13 @@ sudo ./scripts/termux.sh rm <name>...           # remove file(s) from Termux $HO
 sudo ./scripts/termux.sh exec <cmd> [args...]   # run a command in Android (init) context
 ```
 
-A full no-adb re-provision is then `cp` the changed scripts, `rm` any stale staged copies, then `exec sh …/ssh_setup.sh` — see §2.7 for the worked android-helper example.
+A full no-adb re-provision is then `cp` the changed scripts, `rm` any stale staged copies, then `exec sh …/ssh_setup.sh`. For example, redeploying `reboot`/`android`:
+
+```
+sudo ./scripts/termux.sh cp scripts/android.sh
+sudo ./scripts/termux.sh cp scripts/reboot.sh
+sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh   # reinstalls both, bounces sshd at the end
+```
 
 Unlike `reboot` / `android`, this helper is **not installed** and is deliberately **not** wired into the `50-moon-helpers` NOPASSWD sudoers: `exec` runs an arbitrary command as root in Android context, so it must never be passwordless. It is root-only (needs `CAP_SYS_CHROOT`) and run in place as `sudo ./scripts/termux.sh …`. The installed helpers stay NOPASSWD precisely because each is a single fixed action behind its own explicit-path stanza — a generic exec cannot share that boundary.
 
@@ -183,21 +189,19 @@ Run monthly-ish. Watch for:
 - **openssh-server upgrades** — config in `/etc/ssh/sshd_config.d/10-moon.conf` survives; main `sshd_config` may get overwritten (leave it default).
 - **systemd-resolved** getting pulled in as a dep. `start_ubuntu.sh` already handles the dangling `/etc/resolv.conf` symlink on every chroot entry; nothing to do.
 
-### 2.3 Ubuntu 26.04 beta → final LTS (historical — done 2026-04-21)
+### 2.3 Ubuntu beta → final LTS
+
+A beta Ubuntu Base install reaches the final LTS through the ordinary archive — no `do-release-upgrade`. Once the release ships, the archive drops the `-beta` codename suffix and a routine upgrade picks it up:
 
 ```
 ssh moon "sudo apt update && sudo apt full-upgrade -y"
 ```
 
-Executed 2026-04-21 07:23 via `apt-get upgrade` (~17 packages: `apt 3.1.16 → 3.2.0`, `libc6 … -2ubuntu1 → -2ubuntu2`, `base-files 14ubuntu5 → ubuntu6`, `rust-coreutils 0.7.0 → 0.8.0`, etc.). `/etc/os-release` now shows `PRETTY_NAME="Ubuntu 26.04 LTS"` and `VERSION_CODENAME=resolute` — no `-beta` suffix. No release-upgrade dance was needed; the `codename beta` → `codename` flip happens in the repo and `apt-get upgrade` picked it up.
+Confirm with `/etc/os-release` (`PRETTY_NAME` without `-beta`). This box made the 26.04 beta → final jump this way on 2026-04-21; keep the procedure for the next LTS beta cycle. Ubuntu Base is minimized — `apt install unminimize` plus the `--reinstall` pass it triggers restores man pages, docs, and locales (done on this box).
 
-User also ran `apt install unminimize` + the bulk `--reinstall` pass it triggers — man pages, docs, locales restored from Ubuntu Base minimization.
+### 2.4 Tailscale repo pin: `noble` → `resolute`
 
-Keep this procedure here for the next beta cycle (2028 LTS, etc.).
-
-### 2.4 Tailscale repo pin: `noble` → `resolute` (ready to flip, 2026-04-21)
-
-Currently pinned to `noble` because Tailscale had no `resolute` (26.04) pool at install time. Verified 2026-04-21: `https://pkgs.tailscale.com/stable/ubuntu/dists/resolute/InRelease` returns **HTTP 200** — pool is live. Re-verify before switching (note the `dists/<codename>/InRelease` path; the bare `ubuntu/<codename>/` directory returns 404 even when the pool exists):
+Installed pinned to `noble` because Tailscale had no `resolute` (26.04) pool at install time. The `resolute` pool was live as of 2026-04-21; whether the live box has been flipped is **not recorded** — check `/etc/apt/sources.list.d/tailscale.list`. Re-verify the pool before switching (note the `dists/<codename>/InRelease` path; the bare `ubuntu/<codename>/` directory returns 404 even when the pool exists):
 
 ```
 ssh moon 'curl -sI https://pkgs.tailscale.com/stable/ubuntu/dists/resolute/InRelease | head -1'
@@ -213,7 +217,7 @@ sudo sed -i 's|# Tailscale packages for ubuntu noble|# Tailscale packages for ub
 sudo apt update && sudo apt install -y --only-upgrade tailscale
 ```
 
-(Two `sed` calls because the current file has the pool on the `deb …` line and a header comment; update both for consistency.)
+(Two `sed` calls because the file has the pool on the `deb …` line and a header comment; update both for consistency.)
 
 Safe anytime — Tailscale binaries are statically-linked Go, so staying on `noble` works indefinitely if the flip is deferred.
 
@@ -221,78 +225,19 @@ Safe anytime — Tailscale binaries are statically-linked Go, so staying on `nob
 
 Check https://github.com/KernelSU-Next/KernelSU-Next/releases for a new APK. Install with `adb install -r <new>.apk` (standard variant, not `spoofed`). Manager updates the userspace side only — the LKM kernel module inside boot.img does not need re-patching unless release notes say the LKM changed (rare).
 
-### 2.6 Boot-hook model migration (applied 2026-06-05, **pending reboot**)
+### 2.6 Pending device deploys & open issues
 
-Live box migrated from the old monolithic KSU `service.sh` (which re-ran `ssh_setup.sh` + `tailscale_setup.sh` + gated `agents_start.sh` at boot) to the new one-file-per-hook model (repo refactor `975c049`…`6be3a24`). **Done in-chroot; not yet rebooted — the switch takes effect on the next reboot.**
+**This table is the current-state list.** Each row is either a repo change not yet confirmed live on the device, or an open device problem. Update rows in place; when a deploy is verified, delete its row — the commit message keeps the history and `docs/LESSONS.md` keeps any durable root cause. Don't add dated per-change sections to this file.
 
-What changed on the device:
-- `/etc/host-hooks/`: installed `10-sshd.hook` + `20-tailscale.hook` (enabled) and `50-agents.hook.disabled`; removed the old `agents.enabled` + `agents_start.sh`.
-- `/usr/local/sbin/run-as` installed (new baseline privilege-drop helper).
-- `/data/adb/modules/moon-ssh/{service.sh,module.prop}` → **v0.4.0** (generic hook runner), copied via the chroot-escape in `INSTALLATION.md` § "Autostart at boot".
-- New files re-staged into Termux home so a rootfs rebuild / Android-side re-provision redeposits the new model.
+Deploy changed scripts with the `termux` helper (§1 "In-chroot deploys without adb"; `termux.sh` below means `sudo ./scripts/termux.sh`), or with `adb` per `INSTALLATION.md` when SSH is down.
 
-**Agents are OFF:** `50-agents` ships `.disabled`, so freeloader + hermes will **not** auto-start after reboot (they keep running only until the reboot). To restore: uncomment the freeloader + hermes lines in `/etc/host-hooks/50-agents.hook.disabled`, then `sudo mv` it to `…/50-agents.hook`. Note freeloader's entrypoint is now `freeloader.server:create_default_app` (was `freeloader.frontend.app:create_app`) — verify it serves on `127.0.0.1:8000`.
-
-Verify after the reboot:
-```
-ssh moon cat /var/log/moon-ssh-boot.log   # "=== hook 10-sshd start ===" + "=== hook 20-tailscale start ==="; final rc=0
-ssh moon ss -ltn | grep 2222              # sshd up
-ssh moon tailscale status                 # node Connected
-```
-
-### 2.7 Android helper consolidation (deployed 2026-06-06)
-
-Repo refactor merged the split `android-lock` / `android-unlock` helpers into a single `android` dispatcher with `lock` / `unlock [--stayon]` subcommands (`scripts/android.sh`, replacing the two deleted scripts), one sudoers stanza, and (originally) one `/usr/local/bin/android` wrapper. Deletes the old `/usr/local/{sbin,bin}/android-{lock,unlock}` binaries on re-run. Behavior unchanged (same keyevents, same `--stayon`, same chroot-escape). **Deployed 2026-06-06** via the in-chroot `termux` path (§1 "In-chroot deploys without adb"). The `/usr/local/bin/android` wrapper this shipped turned out to be broken and was removed in §2.8 below — see there.
-
-### 2.8 reboot/android self-elevation — wrapper-shadow fix (deployed & verified 2026-06-06)
-
-The `/usr/local/bin/{reboot,android}` PATH wrappers (thin `exec sudo …`) were **dead code**: `/usr/local/sbin` precedes `/usr/local/bin` in PATH, so a bare `reboot` / `android` always resolved to the `/usr/local/sbin` script and never reached the wrapper. The sbin script then ran **unprivileged**, and its `chroot /proc/1/root` failed with `chroot: cannot change root directory to '/proc/1/root': no such directory` — because `/proc` is mounted `hidepid=invisible`, which returns ENOENT for `/proc/1` to any non-root caller. Only `sudo reboot` / `sudo android …` worked (they matched the NOPASSWD sbin path and ran as root). `type -a android` was the tell: two hits, `/usr/local/sbin/android` first.
-
-Fix: the sbin scripts now **self-elevate** (`[ "$(id -u)" -ne 0 ] && exec sudo /usr/local/sbin/<cmd> "$@"`), and `ssh_setup.sh` stops installing the bin wrappers and `rm`s them on re-run. `scripts/{android,reboot}.sh` + `ssh_setup.sh` changed; docs updated across `README.md`, `INSTALLATION.md`, and §1 here.
-
-**Deployed & verified 2026-06-06** via the in-chroot `termux` path (§1). For reference, the deploy was:
-```
-sudo ./scripts/termux.sh cp scripts/android.sh
-sudo ./scripts/termux.sh cp scripts/reboot.sh
-sudo ./scripts/termux.sh cp scripts/ssh_setup.sh
-sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh   # bounces sshd at the end
-```
-Post-deploy verification (from a normal `user` ssh session, no `sudo`): bare `android unlock` / `lock` / `unlock` return rc=0 and drive the screen; `command -v android` shows only `/usr/local/sbin/android` (no `/usr/local/bin/android`).
-
-**Former limitation — root-caused and fixed (missing controlling tty).** The self-elevation path worked from interactive ssh logins but **not** from non-interactive callers (the Claude agent's tool-exec, cron, `ssh` without `-t`): `system_server` rejected the `input`/`wm` binder call with `Failure calling service input: Failed transaction (2147483646)`. The chroot escape itself always succeeded (no ENOENT) — only the Android service call failed. It was **not** the caller's uid/SELinux context (those were identical to the working ssh case); the difference was that the failing process had **no controlling terminal**. Confirmed empirically: the same command fails with no tty and succeeds when wrapped in a pty — across `input`/`wm` (`lock`/`unlock`/`volume`) **and** `am` (`beep`/`play`):
-
-```
-android unlock                       # no tty -> Failure calling service input/window
-python3 -c 'import pty,sys; pty.spawn(sys.argv[1:])' /usr/local/sbin/android unlock   # pty -> rc 0
-```
-
-**Fix:** `scripts/android.sh` now self-allocates a pty whenever it runs without one (`[ ! -t 1 ]`) — python3 `pty.spawn` (argv-preserving), falling back to `script(1)` — so **every** subcommand (`lock`/`unlock`/`beep`/`play`/`volume`) works from non-interactive callers too (agents, cron, the boot hook). An interactive shell already has a tty, so it's a no-op there. No ssh-loopback workaround needed. **Deployed & verified 2026-06-16** — a bare `android beep` from a no-tty context (an AI agent's tool-exec) now auto-allocates a pty and returns `Starting service: …` instead of `Failed transaction`.
-
-### 2.9 reboot stopped disconnecting ssh — SIGHUP regression from §2.8 (**fixed in repo, pending deploy**)
-
-The §2.8 self-elevation (`exec sudo`) inserted a `sudo` layer into `reboot.sh`'s process ancestry, which silently broke its SIGHUP-to-sshd step: it walked a **fixed two hops** up from `$PPID` (correct for `sshd → shell → reboot.sh`), so the extra `sudo` (`sshd → shell → sudo → reboot.sh`) made the HUP land on the login shell instead of sshd. Symptom: `ssh moon reboot` rebooted but the client hung on the socket until the kernel panicked, instead of returning at once. (The §2.8 commit message claimed "the parent walk is the same depth" — that was wrong; the `exec` is in-place but the extra `sudo` process is a real new ancestry hop.)
-
-Fix in `scripts/reboot.sh`: stop counting hops — **climb parents until the first `sshd`** (matches the `sshd` prefix, so OpenSSH ≥9.8's `sshd-session` is covered too). Plus a second path that the old hop-count never handled: an **interactive** login is wrapped in tmux, and the pane shell is a child of the detached tmux *server*, so **sshd is not in the ancestry at all** — for that case `reboot.sh` runs `tmux detach-client` up front (before `exec sudo`, while `$TMUX` still survives the env), which returns the ssh client while the detached pane runs on to fire the reboot. See `docs/LESSONS.md` §4.
-
-**Not yet deployed.** Redeploy via the in-chroot `termux` path (§1), same as §2.8 — stage the new script, then let `ssh_setup.sh` reinstall `/usr/local/sbin/reboot` from the staged copy (it `install`s inside the chroot and bounces sshd at the end):
-```
-sudo ./scripts/termux.sh cp scripts/reboot.sh
-sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh
-```
-Verify: `ssh moon reboot` returns within ~1 s (not after a multi-second socket hang), and the device reboots.
-
-### 2.10 `android beep`/`play` silent when Termux wasn't running — `startservice` can't cold-start a backgrounded app (**fixed in repo, pending deploy**)
-
-After the §2.8 pty fix, `android beep` from a no-tty agent context still failed — but at a *later* stage and with a different error. `am` printed `Starting service: Intent { … cmp=com.termux/.app.RunCommandService }` (so the chroot escape **and** the pty both worked), then Android refused: `Error: app is in background uid null`. The `uid null` is the tell — there was **no running Termux process** (no UidRecord), and Android 8+'s background-execution limit forbids `am startservice` from cold-starting an app's process to deliver a *background* service. (§2.8's verification happened to run while Termux was foregrounded, so it returned a clean `Starting service: …` at the time and the latent issue stayed hidden.)
-
-**Fix:** `scripts/android.sh` now calls `am start-foreground-service` instead of `am startservice`. `RunCommandService` promotes itself to a foreground service (`startForeground()` within the 5 s window), and `start-foreground-service` is the sanctioned call for cold-starting such a service from a background caller — so `beep`/`play` now work even when Termux is dead or backgrounded (the normal case for an agent, cron, or the boot hook). The `--ez …RUN_COMMAND_BACKGROUND true` extra is unchanged (it governs the *command's* backgrounding, not the service's foreground state).
-
-Redeploy via the in-chroot `termux` path (same as §2.8–2.9):
-```
-sudo ./scripts/termux.sh cp scripts/android.sh
-sudo ./scripts/termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh   # bounces sshd at the end
-```
-Lighter alternative when you don't want the sshd bounce (e.g. mid-session): stage to the Android side, then install the live copy directly — `sudo ./scripts/termux.sh cp scripts/android.sh && sudo install -m 0755 -o root -g root scripts/android.sh /usr/local/sbin/android`. Verify (from a no-`sudo` `user` shell, with Termux **not** open): `android beep` plays the tone and returns rc=0 — no `app is in background` error.
+| Item | Repo commit | Deploy | Verify |
+| :--- | :--- | :--- | :--- |
+| **OPEN — sshd does not come up after reboot** (reported 2026-10-24) | — | — | Seen from the Mac: LAN ping answers but `:2222` refuses; `adb` lists the device as `unauthorized` (accept the USB-debugging prompt on the phone); Mac Tailscale was stopped, so the tailnet path is untested. Next: §3 "`ssh moon` times out after a reboot". |
+| `reboot` finds sshd by an ancestry walk and detaches tmux first | `36f2225` | `termux.sh cp scripts/reboot.sh`, then `termux.sh exec sh /data/data/com.termux/files/home/ssh_setup.sh` (bounces sshd) | `ssh moon reboot` returns within ~1 s and the device reboots |
+| `android beep`/`play` use `am start-foreground-service` | `0757a30` | `termux.sh cp scripts/android.sh`, then `ssh_setup.sh` as above — or, without the sshd bounce, `sudo install -m 0755 -o root -g root scripts/android.sh /usr/local/sbin/android` | with Termux **not** open, a no-`sudo` `android beep` plays and returns rc=0 (no `app is in background`) |
+| `tmux-service` no longer pipes through `tee` | `7aed43a` | `termux.sh cp scripts/tmux-service.sh`, then `sudo install -m 0755 scripts/tmux-service.sh /usr/local/bin/tmux-service` | the agent log holds only supervisor bookkeeping lines; `claude --channels` stays interactive in its pane |
+| `start_ubuntu.sh`: `chmod 0644` on resolv.conf/hosts/hostname; non-fatal, logged `/sdcard` bind | `75558a1`, `db91639`, `6f9c703` | deploy not recorded — `termux.sh cp scripts/start_ubuntu.sh` (boot runs it from Termux home, so it takes effect on the next chroot entry) | after a boot, `ls -l /etc/resolv.conf` is `-rw-r--r--` and `/var/log/moon-ssh-boot.log` has an `OK: /sdcard bound` (or WARN) line |
 
 ## 3. Troubleshooting
 
@@ -388,7 +333,7 @@ Expected in KSU-Next v3.2.0 LKM mode. Don't verify root through those sysfs path
 
 ### DNS dies after `ssh_setup.sh` (resolv.conf `0600`)
 
-Symptom: every hostname stops resolving (`Could not resolve host …`) although `tailscale status` shows the node up and `ip route` shows `wlan0` with an address — i.e. the network is fine, only DNS is dead. Check `ls -l /etc/resolv.conf`: if it is `-rw-------` (root-only), the non-root resolver can't read it. Cause: `start_ubuntu.sh` does `rm -f` then `cat >` on `/etc/resolv.conf` (to dodge a systemd-resolved dangling symlink), so it is recreated under the caller's umask — and `ssh_setup.sh` re-enters the chroot under root's `umask 077`, landing the fresh file at `0600`. Fix on the box: `sudo chmod 644 /etc/resolv.conf`. Permanent fix (2026-06-06): `start_ubuntu.sh` now `chmod 0644`s resolv.conf/hosts/hostname after writing — deploy the updated `start_ubuntu.sh` (`sudo ./scripts/termux.sh cp scripts/start_ubuntu.sh`) so it sticks across reboots.
+Symptom: every hostname stops resolving (`Could not resolve host …`) although `tailscale status` shows the node up and `ip route` shows `wlan0` with an address — i.e. the network is fine, only DNS is dead. Check `ls -l /etc/resolv.conf`: if it is `-rw-------` (root-only), the non-root resolver can't read it. Cause: `start_ubuntu.sh` does `rm -f` then `cat >` on `/etc/resolv.conf` (to dodge a systemd-resolved dangling symlink), so it is recreated under the caller's umask — and `ssh_setup.sh` re-enters the chroot under root's `umask 077`, landing the fresh file at `0600`. Fix on the box: `sudo chmod 644 /etc/resolv.conf`. Permanent fix: `start_ubuntu.sh` `chmod 0644`s resolv.conf/hosts/hostname after writing (`75558a1`); its device deploy is tracked in §2.6.
 
 ## 4. Recovery
 

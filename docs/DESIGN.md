@@ -18,7 +18,7 @@ Here is the ultimate stack for pure performance, stability, and architectural co
 
 ### 2. The Deployment: Termux Root Chroot
 * **Engine:** Termux (from F-Droid), granted Superuser via **KSU-Next Manager** — not Magisk. **Why F-Droid client instead of `adb install`-ing the Termux APK directly:** (1) source-of-trust — F-Droid builds Termux from source and signs with its own key, giving a verifiable supply chain distinct from upstream GitHub; (2) auto-updates for Termux and any future FOSS apps (termux-api, etc.) without manual APK wrangling. Cost is one extra app on device; acceptable.
-* **Guest OS:** **Ubuntu 26.04 (Resolute Raccoon) ARM64** — currently beta (`ubuntu-base-26.04-beta-base-arm64.tar.gz`, 34 MiB, built 2026-03-25). Extracted to **`/data/data/com.termux/files/home/ubuntu`** as a native `f2fs`/`ext4` directory — no loopback `.img`. Roll forward to final LTS via `apt update && apt full-upgrade` after release on 2026-04-23.
+* **Guest OS:** **Ubuntu 26.04 LTS (Resolute Raccoon) ARM64** — installed from the beta Ubuntu Base tarball (`ubuntu-base-26.04-beta-base-arm64.tar.gz`, 34 MiB) and rolled forward to the final LTS via `apt full-upgrade`. Extracted to **`/data/data/com.termux/files/home/ubuntu`** as a native `f2fs`/`ext4` directory — no loopback `.img`.
 * **Method:** `start_ubuntu.sh` bind-mounts `/dev`, `/proc`, `/sys`, `/tmp`, `/sdcard` into the rootfs and `chroot`s in.
 * **Advantage:** Complete architectural transparency. Hand-scripted rather than using an opaque GUI app, with zero CPU emulation overhead and explicit control over which Android interfaces the chroot can see.
 

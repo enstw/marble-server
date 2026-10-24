@@ -144,7 +144,7 @@ If `su` errors, re-check the KSU profile. Default-granted profiles leak shell UI
 
 ## 3. Download the Ubuntu rootfs
 
-Ubuntu Base 26.04 ARM64 — currently beta; roll to final LTS post-2026-04-23 via `apt full-upgrade`.
+Ubuntu Base 26.04 ARM64. This box was installed from the beta tarball below and moved to the final LTS by `apt full-upgrade` (MAINTENANCE.md §2.3); use the final tarball if you rebuild from scratch.
 
 ```
 curl -o roms/ubuntu/ubuntu-base-26.04-beta-base-arm64.tar.gz \
@@ -443,7 +443,7 @@ apt-get update
 apt-get install -y tailscale
 ```
 
-Revisit the pin when upgrading to 26.04 LTS on 2026-04-23 — switch to `resolute` if Tailscale has published a pool by then.
+Tailscale now publishes a `resolute` pool; the flip procedure and pin status are in MAINTENANCE.md §2.4.
 
 ## 2. First-run auth
 
@@ -563,7 +563,7 @@ which tmux-service     # /usr/local/bin/tmux-service
 
 ## 2. Run a command as a tmux service
 
-`tmux-service` wraps a command in a named, detached tmux session with crash-loop recovery and a log tail. Always run it as the user that should **own** the agent — tmux servers are per-uid, so mixing root and `user` creates two unreachable servers.
+`tmux-service` wraps a command in a named, detached tmux session with crash-loop recovery and a supervisor log. Always run it as the user that should **own** the agent — tmux servers are per-uid, so mixing root and `user` creates two unreachable servers.
 
 ```
 tmux-service <name> -- <cmd> [args...]
@@ -582,9 +582,9 @@ tmux kill-session -t demo
 What `tmux-service` does:
 
 - Kills any existing session with the same name (clean redeploy).
-- Starts a detached session running `while true; do <cmd>; sleep 2; done 2>&1 | tee -a <log>`.
-- Log path: `${XDG_STATE_HOME:-$HOME/.local/state}/moon-agents/<name>.log`.
-- `sleep 2` between restarts caps the restart rate at ~0.5 Hz so a tight-crashing agent doesn't burn CPU.
+- Starts a detached session that re-runs `<cmd>` on the pane's pty (never piped, so interactive TUIs stay interactive — `docs/LESSONS.md` §5).
+- Crash-loop guard: a run shorter than 60 s is a fast-fail; consecutive fast-fails back off exponentially (2 s → 300 s) and after 10 the session logs `CIRCUIT OPEN` and exits. Knobs: `TMUX_SVC_HEALTHY_SECS` / `_MAX_FAILS` / `_BASE_SLEEP` / `_BACKOFF_CAP`.
+- Log path: `${XDG_STATE_HOME:-$HOME/.local/state}/moon-agents/<name>.log` — supervisor bookkeeping only (start / exited rc / backoff / circuit-open); the command's own output stays in the pane.
 
 ### Common ops
 
@@ -593,7 +593,7 @@ What `tmux-service` does:
 | List running services | `tmux ls` |
 | Attach (read + type) | `tmux attach -t <name>` |
 | Detach from attached session | `Ctrl-b d` |
-| Tail live log | `tail -f ~/.local/state/moon-agents/<name>.log` |
+| Tail supervisor log | `tail -f ~/.local/state/moon-agents/<name>.log` |
 | Stop the service | `tmux kill-session -t <name>` |
 | Redeploy with new args | re-run `tmux-service <name> -- <new cmd>` |
 
@@ -719,7 +719,7 @@ One-time provisioning:
    Without it, `RunCommandService` refuses with a "requires allow-external-apps" notification.
 1. **`ffmpeg`** (chroot, for `beep` only) — `sudo apt install -y ffmpeg`. `beep` synthesizes its tone once to `/sdcard/.moon-beep.wav`; `play <file>` needs no ffmpeg.
 
-Verify (from an **interactive ssh session** — see the caveat):
+Verify:
 
 ```
 android beep                  # gravitational-wave inspiral chirp (synthesized once via ffmpeg)
@@ -737,16 +737,16 @@ am start-foreground-service --user 0 -n com.termux/com.termux.app.RunCommandServ
   --ez com.termux.RUN_COMMAND_BACKGROUND true
 ```
 
-**Background cold-start:** `beep`/`play` use `am start-foreground-service` (not `startservice`). On Android 8+ the background-execution limit bars `startservice` from cold-starting a backgrounded or dead app's process for a *background* service — when Termux isn't running, `am startservice` fails with `Error: app is in background uid null` (no UidRecord for Termux). `RunCommandService` promotes itself to a foreground service, so `start-foreground-service` is the sanctioned cold-start from any background caller (agent, cron, boot hook), with no need for Termux to be open first. See MAINTENANCE.md §2.10.
+**Background cold-start:** `beep`/`play` use `am start-foreground-service` (not `startservice`). On Android 8+ the background-execution limit bars `startservice` from cold-starting a backgrounded or dead app's process for a *background* service — when Termux isn't running, `am startservice` fails with `Error: app is in background uid null` (no UidRecord for Termux). `RunCommandService` promotes itself to a foreground service, so `start-foreground-service` is the sanctioned cold-start from any background caller (agent, cron, boot hook), with no need for Termux to be open first. See LESSONS.md §4.
 
-**Controlling tty:** like `lock`/`unlock`, these are `system_server` binder calls (`am start-foreground-service`, `input keyevent`) that fail with `Failure calling service …: Failed transaction (2147483646)` when the caller has **no controlling terminal**. `android.sh` auto-allocates a pty when invoked without one, so beep/play/volume work from non-interactive callers (cron, the boot hook, an AI agent's tool-exec, `ssh` without `-t`) as well as interactive shells — see MAINTENANCE.md §2.8 for the root cause and the fix. TTS (`termux-tts-speak`) is wired in Termux:API but is silent on this build — no Android TTS engine is installed; add one (eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech to enable a future `say`.
+**Controlling tty:** like `lock`/`unlock`, these are `system_server` binder calls (`am start-foreground-service`, `input keyevent`) that fail with `Failure calling service …: Failed transaction (2147483646)` when the caller has **no controlling terminal**. `android.sh` auto-allocates a pty when invoked without one, so beep/play/volume work from non-interactive callers (cron, the boot hook, an AI agent's tool-exec, `ssh` without `-t`) as well as interactive shells — root cause in LESSONS.md §4. TTS (`termux-tts-speak`) is wired in Termux:API but is silent on this build — no Android TTS engine is installed; add one (eSpeak-NG TTS / Google TTS) and set it default in Settings → System → Languages → Text-to-speech to enable a future `say`.
 
 Source: `scripts/android.sh`. Day-to-day usage reference: MAINTENANCE.md §1.
 
 ## Gotchas
 
-- **Log growth is unbounded.** `tee -a` keeps appending. Rotate manually (`truncate -s 0 ~/.local/state/moon-agents/<name>.log`) or drop a `logrotate` snippet in `/etc/logrotate.d/moon-agents` if an agent turns chatty.
-- **Crash-loop storms aren't surfaced.** If an agent crashes every 2 s, only the log shows it. Future: add a simple rate-check in `tmux-service` that bails after N crashes in M seconds. Defer until it bites.
+- **Agent output is not logged.** The supervisor log only records restarts; what the agent printed lives in its tmux pane (scrollback) and in whatever files the agent keeps itself. Attach to see it.
+- **A circuit-open service stays down.** After 10 consecutive fast-fails the session exits and nothing restarts it until you fix the command and re-run `tmux-service` (or reboot). `grep 'CIRCUIT OPEN' ~/.local/state/moon-agents/*.log` finds them.
 - **tmux server dies on reboot.** Expected — sessions are in-memory. Boot-time launch recreates them. If `50-agents.hook` is disabled (`.disabled` suffix), no agent services come back after a reboot.
 - **Node 24 from NodeSource pins major.** When Node 26+ comes out and an agent needs it, bump the repo line in `agents_setup.sh` (`node_24.x` → `node_26.x`) and re-run.
 - **`uv` installer fetches the latest release.** Pinned by the Astral install script, not by us. Re-running `agents_setup.sh` will upgrade `uv` in place; revert by `uv self update <old>` if an upgrade breaks a pinned tool.
