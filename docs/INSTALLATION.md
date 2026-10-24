@@ -315,7 +315,7 @@ KSU Manager picks the module up on next boot (or toggle in the Modules UI).
 
 1. Redirects its own stdout/stderr to `$UBUNTU/var/log/moon-ssh-boot.log` (= `/var/log/moon-ssh-boot.log` in-chroot) for post-mortem. Lives inside the rootfs so it can be tailed from the chroot after `ssh moon`.
 1. Sets the kernel hostname via `hostname moon` — Android init defaults to `localhost`, and since the chroot shares the UTS namespace this single call covers both.
-1. Polls up to 10 seconds for `/data/data/com.termux/files/home` to appear (CE-storage decryption completes ~9 s into `late_start service` on this build).
+1. Polls up to 120 seconds for `/data/data/com.termux/files/home` to appear (CE-storage population lands ~9 s to >10 s into `late_start service` on this build) and logs how long it waited.
 1. Invokes `ssh_setup.sh` (new chroot session inside), captures rc.
 1. Invokes `tailscale_setup.sh` (another new chroot session), captures rc.
 1. Exits with ssh's rc if that failed, else tailscale's rc. sshd-down is treated as more critical.
@@ -344,7 +344,7 @@ Log should show both `ssh_setup.sh exited rc=0` and `tailscale_setup.sh exited r
 
 ## Gotcha: service.d timing margin
 
-`service.sh` polls 10 seconds for the Termux app-data dir. The observed CE-populate window is ~9 s — 1 s of margin. If a future ROM/kernel update slows CE population, bump to 30 s. Symptom will be `ERROR: /data/data/com.termux/files/home never appeared` in the boot log.
+`service.sh` polls up to 120 s (`POLL_MAX`) for the Termux app-data dir. The CE-populate window varies between boots — ~9 s on 2026-08-23, >10 s on 2026-10-24, when the former 10 s limit gave up and left sshd down. `late_start service` runs in the background, so the long limit costs nothing on a normal boot. Each boot logs `Termux home present after <n>s`; read it before tuning. Symptom of a timeout is `ERROR: /data/data/com.termux/files/home never appeared` in `/data/local/tmp/moon-ssh-boot.log`.
 
 ## Post-install: non-root `user` account
 

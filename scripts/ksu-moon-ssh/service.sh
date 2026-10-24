@@ -41,9 +41,8 @@
 # At late_start, /data/data/com.termux/... can lag behind /data — the CE-
 # storage app-data subtree finishes populating after late_start fires. exec(2)
 # to a path whose parent doesn't yet exist makes mksh abort the script
-# silently — no log, no sshd, no tailscaled. The ten-second poll below was
-# already there to bridge that window; it just has to run before the
-# in-chroot redirect, not after.
+# silently — no log, no sshd, no tailscaled. The poll below bridges that
+# window; it just has to run before the in-chroot redirect, not after.
 PRELOG=/data/local/tmp/moon-ssh-boot.log
 LOG=/data/data/com.termux/files/home/ubuntu/var/log/moon-ssh-boot.log
 
@@ -59,20 +58,26 @@ echo "uid=$(id -u) gid=$(id -g) context=$(cat /proc/self/attr/current 2>/dev/nul
 # start_ubuntu.sh writes it on every chroot entry.
 hostname moon
 
-# Defensive poll: even with CE auto-unlock, there is a brief window post-
-# /data-mount where app data directories are still being populated by init.
-# Ten seconds is far longer than observed boot windows and still bounds the
-# module against a truly broken state.
-for i in 1 2 3 4 5 6 7 8 9 10; do
-    [ -d /data/data/com.termux/files/home ] && break
-    echo "[$i] waiting for /data/data/com.termux/files/home..."
+# Defensive poll: even with CE auto-unlock, there is a window post-/data-mount
+# where app data directories are still being populated by init. The window is
+# not stable: ~9 s on 2026-08-23, and >10 s on 2026-10-24, which made the old
+# 10 s limit give up and leave sshd down. late_start service runs in the
+# background, so waiting longer costs nothing; the limit only bounds the module
+# against a truly broken state. The elapsed time is logged so the margin stays
+# visible.
+POLL_MAX=120
+i=0
+while [ ! -d /data/data/com.termux/files/home ] && [ "$i" -lt "$POLL_MAX" ]; do
+    [ $((i % 10)) -eq 0 ] && echo "[${i}s] waiting for /data/data/com.termux/files/home..."
     sleep 1
+    i=$((i + 1))
 done
 
 if [ ! -d /data/data/com.termux/files/home ]; then
-    echo "ERROR: /data/data/com.termux/files/home never appeared (preserved at $PRELOG)"
+    echo "ERROR: /data/data/com.termux/files/home never appeared after ${POLL_MAX}s (preserved at $PRELOG)"
     exit 1
 fi
+echo "Termux home present after ${i}s"
 
 # Stage 2 switch — fold the preamble into the in-chroot log and re-redirect.
 # `cp` then `exec >>` (append) preserves the polling preamble; the previous
