@@ -222,7 +222,7 @@ Deploy changed scripts with the `termux` helper (§1 "In-chroot deploys without 
 
 | Item | Repo commit | Deploy | Verify |
 | :--- | :--- | :--- | :--- |
-| `reboot` finds sshd by an ancestry walk and detaches tmux first | `36f2225` | installed copy matches the repo (checked 2026-10-25); only the behavior check is left | `ssh moon reboot` returns within ~1 s and the device reboots |
+| *(none — everything in the repo is live on the device as of 2026-10-25)* | | | |
 
 ## 3. Troubleshooting
 
