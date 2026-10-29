@@ -222,7 +222,7 @@ Deploy changed scripts with the `termux` helper (§1 "In-chroot deploys without 
 
 | Item | Repo commit | Deploy | Verify |
 | :--- | :--- | :--- | :--- |
-| `GHCRTS=-xr64G` default in the shell env (`/etc/profile.d/10-ghcrts.sh` + `/etc/zsh/zshenv` hook) | 4295faf | `termux.sh cp scripts/ssh_setup.sh`, then `termux.sh exec sh …/ssh_setup.sh` | new `zsh -c 'echo $GHCRTS'` prints `-xr64G` |
+| *(none — everything in the repo is live on the device as of 2026-10-29)* | | | |
 
 ## 3. Troubleshooting
 
