@@ -90,6 +90,25 @@ export COLORTERM=truecolor
 EOF
 chmod 0644 /etc/profile.d/10-truecolor.sh
 
+# Cap the GHC runtime's heap address-space reservation (pandoc, Quarto's
+# bundled pandoc, any Haskell binary). The default asks for ~1 TB and refuses
+# a reservation that starts below 8 GB; under this kernel's 39-bit VA the one
+# that fits often starts lower, and the program spins in mmap/munmap forever
+# at startup (docs/LESSONS.md §2). zsh reads /etc/zsh/zshenv on every
+# invocation — interactive or not, login or not — so the default shell gets it
+# everywhere; bash login shells get it through profile.d. A GHCRTS already in
+# the environment wins.
+cat > /etc/profile.d/10-ghcrts.sh <<'EOF'
+[ -n "$GHCRTS" ] || export GHCRTS=-xr64G
+EOF
+chmod 0644 /etc/profile.d/10-ghcrts.sh
+ZENV=/etc/zsh/zshenv
+ZENVLINE='[ -r /etc/profile.d/10-ghcrts.sh ] && . /etc/profile.d/10-ghcrts.sh'
+install -d -m 0755 /etc/zsh
+touch "$ZENV"
+grep -qxF "$ZENVLINE" "$ZENV" || printf '\n# GHC heap reservation cap for 39-bit VA (installed by ssh_setup.sh)\n%s\n' "$ZENVLINE" >> "$ZENV"
+chmod 0644 "$ZENV"
+
 # Provide automatic tmux session management for SSH logins.
 # Creates independent sessions or reattaches to unattached ones,
 # explicitly avoiding AI agent service sessions by using the 'ssh_' prefix.
